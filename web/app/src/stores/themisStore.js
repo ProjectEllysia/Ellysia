@@ -25,11 +25,11 @@ export const useThemisStore = defineStore('themis', () => {
 
   /* ════════════════════════════════ MUNDOS ═════════════════════════════ */
   // Themis vive en tres mundos: el motor propio (Lybra), los escáneres
-  // externos (Nmap/Nikto/Nuclei) y los agentes de Hygeia (Fase I: escaneos
-  // Lybra nacidos del inventario de software de un activo, que se navegan por
+  // externos (Nmap/Nikto/Nuclei) y los agentes de Hygeia (escaneos Lybra
+  // nacidos del inventario de software de un activo, que se navegan por
   // agente en vez de mezclarse en la feed del motor). El toggle de ThemisView
-  // conmuta entre ellos. Lybra es el mundo por defecto (roadmap Fase 6: el
-  // motor propio es el protagonista, los externos son segunda opinión).
+  // conmuta entre ellos. Lybra es el mundo por defecto: el motor propio es el
+  // protagonista, los externos son segunda opinión.
   const world = ref('lybra') // 'external' | 'lybra' | 'agents'
   function setWorld(w) { world.value = w }
 
@@ -51,7 +51,7 @@ export const useThemisStore = defineStore('themis', () => {
     nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null },
     lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null },
     nuclei:  { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null },
-    // Fase I: los escaneos del activo Hygeia seleccionado. Mismo tipo de
+    // Los escaneos del activo Hygeia seleccionado. Mismo tipo de
     // escaneo que `lybra` y misma forma de estado —por eso `LybraResults` se
     // reutiliza tal cual—, pero su propia lista: el backend los sirve por
     // separado (`assetId`) y jamás los mezcla con los del panel.
@@ -60,7 +60,7 @@ export const useThemisStore = defineStore('themis', () => {
 
   // Escaneos Nmap terminados, para el modo "analizar un Nmap existente" de Lybra.
 
-  // Registro de objetivos autorizados (roadmap §6): gate legal por-usuario que
+  // Registro de objetivos autorizados: gate legal por-usuario que
   // desbloquea el autodescubrimiento, el fingerprinting propio y las
   // comprobaciones activas de Lybra sobre un objetivo concreto.
   const authorizedTargets = reactive({ items: [], loading: false, error: null })
@@ -256,7 +256,7 @@ export const useThemisStore = defineStore('themis', () => {
   async function launchNikto(payload) {
     return _launch('/themis/nikto', payload, 'nikto')
   }
-  /** Lanza un escaneo Nuclei (roadmap Fase U1). */
+  /** Lanza un escaneo Nuclei. */
   async function launchNuclei(payload) {
     return _launch('/themis/nuclei', payload, 'nuclei')
   }
@@ -274,13 +274,11 @@ export const useThemisStore = defineStore('themis', () => {
    * tarjetas ya visibles (que vive en `LybraResults`, indexado por id de
    * escaneo, y por tanto sobrevive a que la lista se vuelva a pintar).
    *
-   * Antes esto pedía la página siguiente y la concatenaba, avanzando `d.page`.
-   * Ese avance era el fallo: `loadScans` lee el mismo campo entendiendo que es
-   * la única página a mostrar, así que el siguiente refresco reemplazaba los
-   * treinta escaneos en pantalla por los diez de la tercera página. Ahora sólo
-   * se agranda la ventana y se recarga con la ruta normal — una petición, sin
-   * dos caminos que puedan divergir, y sin el duplicado que aparecía cuando
-   * entraba un escaneo nuevo entre una página y la siguiente.
+   * Solo se agranda la ventana (`d.loadedPages`) y se recarga con la ruta
+   * normal de `loadScans`, que entiende ese campo como el número de páginas
+   * a mostrar de una sola vez — una única petición, sin un `d.page` que avance
+   * por separado y pueda desincronizarse de la ventana visible, y sin
+   * duplicados cuando entra un escaneo nuevo entre una página y la siguiente.
    */
   async function loadMoreLybraScans(type = 'lybra') {
     const d = _scandata(type)
@@ -289,7 +287,7 @@ export const useThemisStore = defineStore('themis', () => {
     await loadScans(type)
   }
 
-  /* ── AGENTES (Fase I: escaneos nacidos del inventario de Hygeia) ── */
+  /* ── AGENTES (escaneos nacidos del inventario de Hygeia) ── */
 
   /**
    * Selecciona un activo de Hygeia y carga sus escaneos.
@@ -325,7 +323,7 @@ export const useThemisStore = defineStore('themis', () => {
     finally { authorizedTargets.loading = false }
   }
 
-  /* ── FRESCURA DE LA BASE DE CONOCIMIENTO (L36) ── */
+  /* ── FRESCURA DE LA BASE DE CONOCIMIENTO ── */
 
   /**
    * Estado de sincronización de NVD, KEV y EPSS.
@@ -390,13 +388,7 @@ export const useThemisStore = defineStore('themis', () => {
     return true
   }
 
-  /**
-   * Lanza un escaneo Lybra: { target, ports?, timeout }.
-   *
-   * Hubo un segundo modo, { sourceScanId }, que analizaba los servicios de un
-   * escaneo Nmap previo, y un flag { deep } que lanzaba Nmap, Nikto y Nuclei
-   * como corroboradores. Ambos se retiraron en L52.
-   */
+  /** Lanza un escaneo Lybra: { target, ports?, timeout }. */
   async function launchLybra(payload) {
     launching.value = true
     try {

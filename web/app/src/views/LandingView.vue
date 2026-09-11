@@ -402,9 +402,9 @@ const philosophyTextRef = ref(null)
 // la misma página gastaba dos peticiones para pintar el mismo número.
 const { version: appVersion } = useAppVersion()
 
-/* Cerrar al pulsar fuera y con Escape, con el composable de la Fase 5 en vez
-   del listener a mano que había en onMounted. El menú móvil se cierra también
-   al pulsar su propio botón, así que el selector cubre los dos. */
+/* Cerrar al pulsar fuera y con Escape, con el composable `useDismissable` en
+   vez de un listener a mano. El menú móvil se cierra también al pulsar su
+   propio botón, así que el selector cubre los dos. */
 useDismissable('.nav-dd', () => { toolsOpen.value = false; docsOpen.value = false })
 useDismissable('.mobile-menu, .menu-toggle', () => { mobileOpen.value = false })
 
@@ -627,7 +627,7 @@ onUnmounted(() => {
    (`.scene { overflow: hidden }`), así que este `overflow` no protegía nada
    del fondo — solo recortaba, sin querer, cualquier desplegable de la
    cabecera (AccountMenu, Herramientas, Documentación) que no cupiera en los
-   100vh del hero (issue #140). */
+   100vh del hero. */
 .vista {
   position: relative;
   height: 100vh;

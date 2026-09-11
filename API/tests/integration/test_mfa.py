@@ -2,6 +2,10 @@
 
 import pyotp
 import pytest
+from sqlalchemy import text
+
+from src.modules.infrastructure import UnitOfWork
+from src.modules.shared._crypto import decrypt_at_rest
 
 pytestmark = pytest.mark.integration
 
@@ -249,3 +253,29 @@ def test_disable_totp_with_valid_code_disables_mfa(client, regular_user, auth_he
     })
     assert login.status_code == 200
     assert "mfaRequired" not in login.get_json()
+
+
+# ── Cifrado en reposo del secreto ─────────────────────────────────────────
+
+
+def test_the_totp_secret_is_encrypted_in_the_database(app, client, regular_user, auth_headers):
+    """El secreto que devuelve /setup nunca debe llegar tal cual a la fila.
+
+    Lo cifra el tipo de columna (``EncryptedText``), no el manager, así que
+    la única forma de comprobarlo es saltarse el ORM y mirar el valor crudo:
+    leyendo ``credential.totp_secret`` se vería ya descifrado y el test
+    pasaría aunque el cifrado hubiera desaparecido.
+    """
+    headers = auth_headers(regular_user)
+    secret = client.post("/users/mfa/totp/setup", headers=headers).get_json()["secret"]
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            row = uow.session.execute(
+                text('SELECT totp_secret FROM "MFATotpCredential" WHERE user_id = :id'),
+                {"id": regular_user.id},
+            ).first()
+
+    stored = row[0]
+    assert stored != secret
+    assert decrypt_at_rest(stored, purpose="mfa") == secret

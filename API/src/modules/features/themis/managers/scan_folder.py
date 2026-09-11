@@ -1,4 +1,4 @@
-"""ScanFolderManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""Gestión de las carpetas usadas para organizar escaneos."""
 
 import logging
 import re

@@ -1,4 +1,4 @@
-"""Las familias web nuevas del feed (L25): cada una con positivo y señuelo.
+"""Las familias web nuevas del feed: cada una con positivo y señuelo.
 
 La regla de oro del issue es que un check nuevo entra con su señuelo. Un check
 que sólo mira el código de estado saca falsos positivos contra un banco de
@@ -39,7 +39,7 @@ def _fired(by_path):
 
 
 def test_the_feed_reached_at_least_fifty_checks():
-    """El criterio de cierre del issue: de 17 (28 tras la Fase 2) a ≥ 50."""
+    """El umbral exigido para el feed: al menos 50 checks."""
     assert len(_CHECKS) >= 50
 
 

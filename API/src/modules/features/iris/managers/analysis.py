@@ -8,8 +8,8 @@ Coordinates the analysis lifecycle:
    determines a verdict, and persists results.
 4. Provides status queries and cancellation support.
 
-D4 en ``plans/deuda-tecnica-y-calidad.md``: extraído del ``managers.py``
-de 64 KB que reunía este manager y el de informes.
+Extraído del antiguo ``managers.py`` de 64 KB, que reunía este manager y el
+de informes.
 """
 
 from __future__ import annotations
@@ -20,14 +20,18 @@ import logging
 from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
-import src.modules.system.config_reading as CR
 from sqlalchemy import and_, or_, update
+from sqlalchemy.exc import SQLAlchemyError
 
+import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc, CANCELLABLE_STATES as _CANCELLABLE_STATES
 from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin, job_context
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox import build_dispatch
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 
 from ..exceptions import (
     IrisAnalysisNotFoundError,
@@ -35,9 +39,17 @@ from ..exceptions import (
     IrisExecutionError,
     IrisInvalidInputError,
     IrisInvalidStateError,
+    IrisRawMessagePurgedError,
 )
-from ..model import IrisAnalysis, IrisRuleResult
-from ..repositories import IrisAnalysisRepository, IrisRuleResultRepository
+from ..model import IrisAnalysis, IrisIndicator, IrisRuleResult
+from ..repositories import (
+    IrisAnalysisRepository,
+    IrisAnalystFeedbackRepository,
+    IrisIndicatorRepository,
+    IrisRuleResultRepository,
+)
+from ..services.batch import message_fingerprint
+from ..services.indicators import extract_indicators, indicator_rows, refang
 from ..services.rules import iris_rules, RuleResult
 from ..services.text import extract_domain, is_free_provider, url_host
 from ..services import parse_raw_message
@@ -48,9 +60,36 @@ from ..services.failures import (
     classify_failure,
 )
 from ..services.parsers import build_path, parse_received_line
-from ..services.quality import AnalysisQuality, assess_quality, cap_verdict, detector_version
+from ..services.contexts import (
+    CONTEXT_INNER,
+    CONTEXT_WRAPPER,
+    ContextEvaluation,
+    choose_winning_evaluation,
+    context_of_type,
+    preview_headers,
+)
+from ..services.scoring import ScoringPolicy, current_policy
+from ..services.quality import (
+    AnalysisMode,
+    ConfidenceAssessment,
+    body_dependent_rule_names,
+    assess_confidence,
+    assess_coverage,
+    assess_quality,
+    cap_verdict,
+    detector_version,
+)
 from ..services.ai_writer import IrisAIWriter
+from ..services.trust import (
+    TrustEntry,
+    apply_trust,
+    build_trust_record,
+    describe_trust_record,
+    find_matching_entry,
+    is_sender_authenticated,
+)
 from .notifications import IrisPhishingNotifyManager
+from .trust import IrisTrustPolicyManager
 
 
 logger = logging.getLogger(__name__)
@@ -61,33 +100,62 @@ logger = logging.getLogger(__name__)
 _VERDICT_ORDER = ["Legitimate", "Suspicious", "Phishing"]
 _VERDICT_SEVERITY = {v: i for i, v in enumerate(_VERDICT_ORDER)}
 
-# Subtractive risk model: an analysis starts from this clean ceiling and
-# rules can only *subtract* from it. A passing rule contributes nothing; a
-# failing rule subtracts its (negative) score. This removes the historical
-# "authentication cushion", where dozens of small positive credits (SPF/DKIM/
-# DMARC pass, etc.) buried a few strong phishing signals — a clean-auth BEC
-# from Gmail used to net *positive* despite a -23 risk payload underneath.
-_CEILING = 100.0
+# El techo, los suelos por familia y los umbrales viven en la política de
+# puntuación (``services/scoring.py``), que se guarda con cada análisis.
 
-# Recalibración de pesos (§18): techos de familia. Varias reglas dentro del
-# mismo cluster suelen corroborar el mismo hecho subyacente (p.ej. SPF+DKIM+
-# DMARC+Domain Alignment todas fallando describen UN fallo de autenticación,
-# no cuatro independientes) -- sin techo, sumarlas todas exagera la
-# confianza del score en un solo hecho. Cada techo es el mínimo (más
-# negativo) que la suma de penalizaciones de esa familia puede alcanzar;
-# reglas sin `family` (Threading, Recipient, List-Unsubscribe) no tienen
-# techo -- ya son individualmente pequeñas. ARC Chain se queda fuera de
-# "auth" a propósito (forense: describe un hecho distinto, la cadena de
-# reenvío, no la autenticación del propio mensaje).
-_FAMILY_SCORE_FLOORS = {
-    "auth": -25.0,
-    "identity": -28.0,
-    "reply_path": -15.0,
-    "content": -25.0,
-    "links": -30.0,
-    "received": -12.0,
-    "attachment": -28.0,
-}
+
+
+
+
+
+def _rule_to_dict(rule: IrisRuleResult) -> Dict[str, Any]:
+    """Serializa una fila de regla con las claves camelCase de la API.
+
+    Args:
+        rule: Fila ``IrisRuleResult`` persistida.
+
+    Returns:
+        dict: ``ruleId`` (estable; ``None`` en filas anteriores a la
+            taxonomía), ``ruleName`` (visible), ``severity``,
+            ``mitreTechniques`` (lista, vacía si no hay), ``category``,
+            ``score``, ``verdict``, ``details``, ``recommendation``,
+            ``evidence`` (lista, vacía si no hay) y ``evidenceUnavailableReason``.
+    """
+    return {
+        "ruleId": rule.rule_id,
+        "ruleName": rule.rule_name,
+        "severity": rule.severity,
+        "mitreTechniques": rule.mitre_techniques or [],
+        "category": rule.category,
+        "score": rule.score,
+        "verdict": rule.verdict,
+        "details": rule.details,
+        "recommendation": rule.recommendation,
+        "evidence": rule.evidence or [],
+        "evidenceUnavailableReason": rule.evidence_unavailable_reason,
+    }
+
+
+def _winning_message_context(analysis: IrisAnalysis):
+    """Parsea el raw del análisis y devuelve el contexto que ganó.
+
+    Las vistas derivadas del raw (cadena Received, IOCs) tienen que
+    describir el mismo mensaje que el veredicto: en un reenvío cuyo
+    envoltorio fue más grave, el envoltorio.
+
+    Args:
+        analysis: Análisis ya cargado y con su propiedad comprobada.
+
+    Returns:
+        MessageContext: El contexto ganador (el interno si el análisis no
+            guardó ninguno).
+
+    Raises:
+        IrisRawMessagePurgedError: La retención ya purgó el raw.
+    """
+    if analysis.raw_headers is None:
+        raise IrisRawMessagePurgedError(analysis.id)
+    return context_of_type(parse_raw_message(analysis.raw_headers), analysis.winning_context)
 
 
 class IrisManager(TaskTrackingMixin):
@@ -105,7 +173,15 @@ class IrisManager(TaskTrackingMixin):
     TASK_CATEGORY = "iris.analyze"
     _TOP_SIGNALS_LIMIT = 5
 
-    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
+    AI_SUMMARY_EXTERNAL_ID_PREFIX = "iris-ai-summary:"
+
+    #: Estados desde los que se puede reclamar una generación de resumen.
+    #: ``None`` es "nunca se pidió" y ``failed`` es un reintento legítimo;
+    #: ``running`` no está porque ya hay una en curso, y ``done`` solo se
+    #: reclama con una regeneración explícita.
+    _AI_SUMMARY_CLAIMABLE = (None, "failed")
+
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin.
 
     # =========================================================================
     # PUBLIC API
@@ -120,41 +196,50 @@ class IrisManager(TaskTrackingMixin):
         connection_id: int | None = None,
         source_message_uid: str | None = None,
     ) -> int:
-        """Submit raw email headers (or a full message) for background analysis.
+        """Envía cabeceras de correo crudas (o un mensaje completo) a análisis
+        en segundo plano.
 
-        Creates an IrisAnalysis record in ``pending`` state and enqueues
-        a TaskQueue task (category ``"iris.analyze"``) that runs every
-        registered rule, aggregates scores, and persists the results.
+        Crea una fila ``IrisAnalysis`` en estado ``pending`` y encola una
+        tarea de TaskQueue (categoría ``"iris.analyze"``) que ejecuta todas
+        las reglas registradas, agrega las puntuaciones y persiste los
+        resultados.
 
         Args:
-            raw_headers: Headers-only block as plain text (legacy input).
-            user_id:     Primary key of the requesting user.
-            title:       Optional user-defined label for quick
-                         identification in history.
-            raw_message: Full raw ``.eml`` message as plain text (Fase 2).
-                         Takes priority over ``raw_headers`` when both are
-                         given, since it's a superset of the header data.
-                         Rules that need body/links/attachments only see
-                         them when this is provided.
-            connection_id: IrisMailboxConnection this message was ingested
-                         through (Fase 3-4). None for manual submissions —
-                         the original, still-default flow.
-            source_message_uid: Provider-specific message id, set only
-                         together with connection_id. The (connection_id,
-                         source_message_uid) pair is UNIQUE at the DB level,
-                         so a mailbox sync retry that resubmits the same
-                         message raises instead of duplicating the analysis.
+            raw_headers: Bloque de solo cabeceras como texto plano (entrada
+                original, anterior al soporte de mensaje completo).
+            user_id: Primary key del usuario que solicita el análisis.
+            title: Etiqueta opcional definida por el usuario para
+                identificarlo rápido en el histórico. Por defecto ``None``.
+            raw_message: Mensaje ``.eml`` crudo completo como texto plano.
+                Tiene prioridad sobre ``raw_headers`` cuando se dan
+                los dos, porque es un superconjunto de los datos de
+                cabecera. Las reglas que necesitan cuerpo/enlaces/adjuntos
+                solo los ven cuando se proporciona este campo. Por defecto
+                ``None``.
+            connection_id: IrisMailboxConnection por la que se ingirió este
+                mensaje (ingesta automática de buzón). ``None`` para envíos manuales -- el
+                flujo original, que sigue siendo el que no requiere
+                conexión. Por defecto ``None``.
+            source_message_uid: Id del mensaje específico del proveedor,
+                solo se da junto con ``connection_id``. El par
+                ``(connection_id, source_message_uid)`` es UNIQUE a nivel de
+                base de datos. Un reintento de sync de buzón que reenvía el
+                mismo mensaje nunca duplica el análisis ni cobra cuota dos
+                veces -- ver la comprobación de idempotencia más abajo.
+                Por defecto ``None``.
 
         Returns:
-            The new IrisAnalysis primary key (``analysis_id``).  The
-            caller should store this to later poll status or fetch the
-            full report.
+            int: La primary key del ``IrisAnalysis`` (``analysis_id``) --
+                bien el que se acaba de crear, bien el ya existente cuando
+                ``(connection_id, source_message_uid)`` ya había sido
+                aceptado por una llamada anterior. El llamante debe guardarlo
+                para consultar más tarde el estado o pedir el informe completo.
 
         Raises:
-            IrisInvalidInputError: If neither input is given, or the
-                content contains fewer than the minimum required header
-                lines (configurable via ``iris.min_headers`` in
-                SecOpsConfig.json).
+            IrisInvalidInputError: Si no se da ninguna de las dos entradas, o
+                si el contenido tiene menos líneas de cabecera que el mínimo
+                requerido (configurable vía ``iris.min_headers`` en
+                ``SecOpsConfig.json``).
         """
         raw_input = raw_message or raw_headers
         if not raw_input:
@@ -164,27 +249,73 @@ class IrisManager(TaskTrackingMixin):
 
         self._validate_headers_pre(raw_input)
 
+        # Comprobar idempotencia ANTES de cobrar cuota -- un reintento
+        # de sync de buzón (Gmail/Graph pueden repetir un mensaje) para algo
+        # ya aceptado no debe volver a cobrar ni crear un segundo análisis.
+        # El propio checkpoint de mailbox ya evita llegar hasta aquí
+        # en el caso común; esto cubre además la llamada directa.
+        exited_third_party_connection = connection_id is not None and source_message_uid is not None
+        if exited_third_party_connection:
+            existing = build_repository(IrisAnalysisRepository).get_by_source(
+                connection_id, source_message_uid,
+            )
+            if existing is not None:
+                return existing.id
+
         # Después de validar la entrada: un correo mal pegado no gasta cuota.
         # Aquí y no en el endpoint, porque por este método entra también la
         # ingesta desde un buzón conectado (mailbox sync), que no pasa por HTTP.
-        QuotaManager().consume(user_id, LimitKey.IRIS_ANALYSES)
-
-        analysis_id = self._create_analysis_record(
-            raw_input, user_id, title=title,
-            connection_id=connection_id, source_message_uid=source_message_uid,
-        )
-        logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
+        quota_manager = QuotaManager()
+        quota_manager.consume(user_id, LimitKey.IRIS_ANALYSES)
 
         if self.TASK_CATEGORY is None:
+            quota_manager.refund(user_id, LimitKey.IRIS_ANALYSES)
             raise IrisExecutionError("Task category is not defined for IrisManager.")
 
-        self._task_queue.submit(
-            func=IrisManager.execute_iris_analysis,
-            args=(analysis_id, raw_input),
-            name=f"IrisAnalysis-{analysis_id}",
-            category=self.TASK_CATEGORY,
-            external_id=self.external_id_for(analysis_id),
+        analysis = IrisAnalysis(
+            raw_headers=raw_input,
+            user_id=user_id,
+            title=title.strip()[:120] if title and title.strip() else None,
+            status="pending",
+            connection_id=connection_id,
+            source_message_uid=source_message_uid,
+            content_sha256=message_fingerprint(raw_input),
         )
+        try:
+            with UnitOfWork() as uow:
+                IrisAnalysisRepository(uow).save(analysis)
+                analysis_id = analysis.id
+                # La intención de publicar se guarda en la MISMA
+                # transacción que el análisis -- si la API muere o Redis
+                # falla justo después del commit, el barrido periódico de
+                # la outbox (o la reconciliación de arranque) publica el
+                # job más tarde en vez de dejar la fila huérfana para
+                # siempre (ver system/taskqueue/outbox.py).
+                dispatch = TaskDispatchRepository(uow).save(build_dispatch(
+                    func=IrisManager.execute_iris_analysis,
+                    name=f"IrisAnalysis-{analysis_id}",
+                    category=self.TASK_CATEGORY,
+                    args=(analysis_id, raw_input),
+                    external_id=self.external_id_for(analysis_id),
+                ))
+                # Durable antes de intentar publicar: el worker corre en otro proceso.
+                uow.commit_for_handoff()
+        except SQLAlchemyError:
+            # Carrera perdida contra otra llamada para el mismo mensaje: la
+            # comprobación de arriba y este insert no son atómicos entre sí,
+            # así que la UniqueConstraint sigue siendo la defensa final. Se
+            # reembolsa la cuota que se acaba de cobrar por un análisis que
+            # nunca llegó a crearse -- nunca se cobra por un duplicado.
+            quota_manager.refund(user_id, LimitKey.IRIS_ANALYSES)
+            raise
+
+        logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
+
+        # Camino feliz: publicar ahora mismo en vez de esperar al barrido
+        # periódico, para que el análisis arranque sin latencia añadida en
+        # el caso normal (Redis arriba). Si falla, la fila queda `pending`
+        # y algo la recogerá más tarde -- nunca se pierde el trabajo.
+        OutboxDispatcher.dispatch(dispatch.id, task_queue=self._task_queue)
 
         return analysis_id
 
@@ -199,7 +330,7 @@ class IrisManager(TaskTrackingMixin):
 
     @staticmethod
     def get_capabilities() -> Dict[str, Any]:
-        """Límites y modos de análisis que la interfaz necesita conocer (B13).
+        """Límites y modos de análisis que la interfaz necesita conocer.
 
         El backend rechazaba mensajes por encima de un tamaño que la UI no
         tenía forma de saber: el usuario elegía un fichero que la interfaz
@@ -212,16 +343,55 @@ class IrisManager(TaskTrackingMixin):
         el módulo, para que un cambio vía ``PUT /system`` surta efecto sin
         reiniciar (mismo patrón que ``AnalyzeRequestSchema.validate_max_size``,
         que es la validación que este endpoint describe).
+
+        Publica también lo que la interfaz necesita para que el usuario elija
+        el modo sabiendo qué implica: qué reglas se quedan sin nada que mirar
+        en modo cabeceras y el aviso de que el modo completo puede incluir
+        datos sensibles.
+
+        Returns:
+            dict: ``maxMessageBytes``, ``minHeaders``, ``analysisModes``
+                (valores de ``AnalysisMode``), ``headersOnlyUncoveredRules``,
+                ``fullMessageNotice`` y ``verdictThresholds``.
         """
         config = CR.iris_config()
+        policy = current_policy()
         return {
             "maxMessageBytes": config.max_message_bytes,
             "minHeaders": config.min_headers,
-            "analysisModes": ["headers", "message"],
+            "analysisModes": [mode.value for mode in AnalysisMode],
+            "headersOnlyUncoveredRules": body_dependent_rule_names(iris_rules.get_rules()),
+            "fullMessageNotice": (
+                "El mensaje completo incluye el cuerpo y los adjuntos, que pueden contener datos "
+                "sensibles: personales, confidenciales o de terceros. Iris lo guarda cifrado y "
+                f"purga ese contenido a los {config.raw_message_retention_days} días; el resultado "
+                "del análisis se conserva."
+            ),
             "verdictThresholds": {
-                "legitimate": config.legitimate_threshold,
-                "suspicious": config.suspicious_threshold,
+                "legitimate": policy.legitimate_threshold,
+                "suspicious": policy.suspicious_threshold,
             },
+        }
+
+    @staticmethod
+    def get_retention_report(user_id: int) -> Dict[str, Any]:
+        """Política de retención vigente más el estado real de los análisis
+        de este usuario frente a ella: cierra el criterio de
+        "existe una política visible" con datos concretos, no solo los
+        valores de configuración -- un usuario puede ver cuántos de sus
+        análisis conservan todavía el raw y cuántos ya lo perdieron por
+        retención, no solo que "el raw caduca a los 90 días" en abstracto.
+        """
+        config = CR.iris_config()
+        repo = build_repository(IrisAnalysisRepository)
+        total = repo.count_by_user(user_id)
+        with_raw = repo.count_with_raw_retained_by_user(user_id)
+        return {
+            "raw_message_retention_days": config.raw_message_retention_days,
+            "analysis_retention_days": config.analysis_retention_days,
+            "total_analyses": total,
+            "analyses_with_raw_retained": with_raw,
+            "analyses_with_raw_purged": total - with_raw,
         }
 
     def get_analysis_status(self, analysis_id: int) -> Optional[str]:
@@ -249,23 +419,29 @@ class IrisManager(TaskTrackingMixin):
         return self.task_progress_of(analysis_id)
 
     def get_analysis_results(self, analysis_id: int) -> Dict[str, Any]:
-        """Return the full analysis report for a finished analysis.
+        """Informe completo de un análisis terminado.
 
-        The report includes the original headers, per-rule results,
-        the total score, the textual verdict, and a flat list of
-        actionable recommendations.
+        Todo lo que describe el mensaje —reglas, señales principales,
+        recomendaciones y vista previa de cabeceras— sale del **contexto
+        ganador** (``IrisAnalysis.winning_context``): en un reenvío cuyo
+        envoltorio es más grave que el original, el informe habla del
+        envoltorio, porque es el que produjo el veredicto. El otro mensaje
+        viaja aparte en ``secondaryContext``.
 
         Args:
-            analysis_id: Primary key of the finished analysis.
+            analysis_id: Primary key del análisis terminado.
 
         Returns:
-            A dict with keys: analysisId, status, rawHeaders, totalScore,
-            verdict, startedAt, finishedAt, user, rules, recommendations.
+            dict: El informe con claves camelCase (``analysisId``,
+                ``verdict``, ``totalScore``, ``rules``, ``winningContext``,
+                ``secondaryContext``, ``previewHeaders``…; ver
+                ``AnalysisDetailResponseSchema``). ``secondaryContext`` es
+                ``None`` cuando el mensaje no era un reenvío.
 
         Raises:
-            IrisAnalysisNotFoundError: If *analysis_id* does not exist.
-            IrisAnalysisNotReadyError: If the analysis is not yet
-                ``finished`` (callers should poll ``/status`` first).
+            IrisAnalysisNotFoundError: Si *analysis_id* no existe.
+            IrisAnalysisNotReadyError: Si el análisis aún no está
+                ``finished`` (el llamante debe sondear ``/status`` antes).
         """
         analysis = build_repository(IrisAnalysisRepository).get_by_id(analysis_id)
         if not analysis:
@@ -274,34 +450,42 @@ class IrisManager(TaskTrackingMixin):
         if analysis.status != "finished":
             raise IrisAnalysisNotReadyError(analysis_id, analysis.status)
 
-        rules = build_repository(IrisRuleResultRepository).get_by_analysis(analysis_id)
-
-        rules_data = [
-            {
-                "ruleName": rule.rule_name,
-                "category": rule.category,
-                "score": rule.score,
-                "verdict": rule.verdict,
-                "details": rule.details,
-                "recommendation": rule.recommendation,
-            }
-            for rule in rules
-        ]
+        rule_repo = build_repository(IrisRuleResultRepository)
+        # Un análisis sin contexto ganador guardado solo tiene filas del
+        # contexto que ganó, sin marcar: se leen todas, como siempre.
+        rules = rule_repo.get_by_analysis(analysis_id, context_type=analysis.winning_context)
+        rules_data = [_rule_to_dict(rule) for rule in rules]
 
         recommendations = [
             rule["recommendation"] for rule in rules_data
             if rule["recommendation"] is not None
         ]
 
+        secondary_context = None
+        if analysis.secondary_context:
+            secondary_rules = rule_repo.get_by_analysis(
+                analysis_id, context_type=analysis.secondary_context.get("contextType"),
+            )
+            secondary_context = {
+                **analysis.secondary_context,
+                "rules": [_rule_to_dict(rule) for rule in secondary_rules],
+            }
+
         from src.modules.users import UserManager
         user = UserManager().get_user_by_id(analysis.user_id)
         username = user.username if user else "unknown"
 
-        # Re-parsed on demand (same no-extra-column pattern as
-        # get_analysis_path/get_analysis_iocs) purely to surface whether
-        # this analysis unwrapped a "report phishing" forward — the
-        # persisted rule results already reflect the unwrapped original.
+        # Se reparsea bajo demanda para la identidad del envoltorio y la vista
+        # previa: el raw ya está guardado y cifrado, y duplicar sus cabeceras
+        # en columnas sería otra copia que purgar en la retención.
         context = parse_raw_message(analysis.raw_headers or "")
+        winning_message = context_of_type(context, analysis.winning_context)
+        preview = preview_headers(winning_message) if analysis.raw_headers else None
+
+        # Import tardío: el manager de feedback depende de este para
+        # comprobar la propiedad del análisis.
+        from .feedback import IrisFeedbackManager
+        latest_feedback = IrisFeedbackManager.latest_for_analysis(analysis_id)
 
         return {
             "analysisId": analysis.id,
@@ -319,16 +503,28 @@ class IrisManager(TaskTrackingMixin):
             "unwrappedFromForward": context.unwrapped_from_forward,
             "wrapperFrom": context.wrapper_from or None,
             "wrapperSubject": context.wrapper_subject or None,
+            "winningContext": analysis.winning_context,
+            "winningReason": analysis.winning_reason,
+            "secondaryContext": secondary_context,
+            "previewHeaders": preview,
             "startedAt": isoformat_utc(analysis.started_at),
             "finishedAt": isoformat_utc(analysis.finished_at),
             "analysisQuality": analysis.analysis_quality,
+            "confidence": analysis.confidence,
+            "coverage": analysis.coverage,
+            "uncertaintyReasons": analysis.uncertainty_reasons or [],
             "failedRules": analysis.failed_rules or [],
             "detectorVersion": analysis.detector_version,
+            "scoringVersion": analysis.scoring_version,
+            "scoringSnapshot": analysis.scoring_snapshot,
             "failureCode": analysis.failure_code,
             "failureReason": analysis.failure_reason,
             "user": username,
             "rules": rules_data,
             "recommendations": recommendations,
+            "latestFeedback": latest_feedback,
+            "trustApplied": analysis.trust_applied,
+            "tags": [tag.name for tag in analysis.tags],
         }
 
     @classmethod
@@ -349,6 +545,7 @@ class IrisManager(TaskTrackingMixin):
         negative.sort(key=lambda pair: pair[1]["score"])
         return [
             {
+                "ruleId": r.get("ruleId"),
                 "ruleName": r["ruleName"],
                 "category": r.get("category"),
                 "score": r["score"],
@@ -370,27 +567,49 @@ class IrisManager(TaskTrackingMixin):
 
         Returns:
             The new IrisAnalysis primary key.
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis -- sin él no hay nada que reanalizar.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.raw_headers is None:
+            raise IrisRawMessagePurgedError(analysis_id)
         title = f"{analysis.title} (reanálisis)" if analysis.title else f"Reanálisis de #{analysis_id}"
         return self.analyze(analysis.raw_headers, user_id, title=title)
 
     def get_analysis_path(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
-        """Return the parsed Received-chain path for an analysis.
+        """Cadena Received del mensaje que produjo el veredicto.
 
-        The path is derived on demand from ``raw_headers`` — no extra
-        column is needed. Returns ``available: false`` for headers-only
-        submissions (no full ``.eml`` means no Received chain to
-        inspect).
+        Se deriva bajo demanda del raw, del contexto ganador del análisis (el
+        envoltorio de un reenvío si fue él quien decidió el veredicto; si no,
+        el original). ``available: false`` en envíos de solo cabeceras sin
+        cadena Received que inspeccionar.
+
+        Args:
+            analysis_id: Primary key del análisis.
+            user_id: Usuario que pide la vista; debe ser el dueño.
+
+        Returns:
+            dict: ``analysisId``, ``contextType`` (el contexto ganador, o
+                ``None`` en análisis que no lo guardaron) y los campos de
+                ``build_path`` (``available``, ``hops``, ``transitions``…).
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis -- distinto de "sin cuerpo completo":
+                aquí no hay ningún raw que parsear, ni cabeceras.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
-        context = parse_raw_message(analysis.raw_headers or "")
+        context = _winning_message_context(analysis)
         return {
             "analysisId": analysis.id,
+            "contextType": analysis.winning_context,
             **build_path(context.received_headers),
         }
 
-    _EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+")
+
+    
 
     def get_analysis_iocs(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
         """Extract Indicators of Compromise (IOCs) from an analysis.
@@ -401,67 +620,64 @@ class IrisManager(TaskTrackingMixin):
         the parsed ``MessageContext`` already gives a uniform view of
         headers, body links and the Received chain regardless of which
         rules fired, so this stays correct as rules are added/changed.
+        Los IOCs salen del contexto ganador, el mismo mensaje que describe el
+        veredicto (ver ``_winning_message_context``).
 
         Returns:
-            A dict with ``domains``, ``urls``, ``ips``, ``emails`` and
+            A dict with ``analysisId``, ``contextType`` (contexto ganador, o
+            ``None`` en análisis que no lo guardaron), ``domains``, ``urls``, ``ips``, ``emails`` and
             ``hashes`` (SHA256 of every attachment, not just ones a rule
             flagged — an analyst pivoting to a threat-intel lookup wants
             the hash regardless of whether a heuristic fired) — each a
             sorted, deduplicated list of strings pivotable in an external
             tool (SIEM, threat-intel lookup, blocklist).
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
-        context = parse_raw_message(analysis.raw_headers or "")
-
-        domains: set[str] = set()
-        emails: set[str] = set()
-        urls: set[str] = set()
-        ips: set[str] = set()
-        hashes: set[str] = set()
-
-        for header_name in ("from", "reply-to", "return-path"):
-            raw_value = context.headers.get(header_name, "")
-            domain = extract_domain(raw_value)
-            if domain:
-                domains.add(domain)
-            email_match = self._EMAIL_RE.search(raw_value)
-            if email_match:
-                emails.add(email_match.group(0).lower())
-
-        for link in context.links:
-            href = (link.href or "").strip()
-            if not href:
-                continue
-            urls.add(href)
-            host = url_host(href)
-            if host:
-                domains.add(host)
-
-        for line in context.received_headers:
-            hop = parse_received_line(line)
-            if hop.get("fromIp"):
-                ips.add(hop["fromIp"])
-
-        for att in context.attachments:
-            if att.content:
-                hashes.add(hashlib.sha256(att.content).hexdigest())
-
+        context = _winning_message_context(analysis)
         return {
             "analysisId": analysis.id,
-            "domains": sorted(domains),
-            "urls": sorted(urls),
-            "ips": sorted(ips),
-            "emails": sorted(emails),
-            "hashes": sorted(hashes),
+            "contextType": analysis.winning_context,
+            **extract_indicators(context),
         }
 
-    AI_SUMMARY_EXTERNAL_ID_PREFIX = "iris-ai-summary:"
+    def export_analysis(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
+        """Exportación completa de un análisis: resultado, reglas,
+        raw (si no se ha purgado ya) y las dos vistas que se derivan de él
+        (Received-chain path, IOCs).
 
-    #: Estados desde los que se puede reclamar una generación de resumen.
-    #: ``None`` es "nunca se pidió" y ``failed`` es un reintento legítimo;
-    #: ``running`` no está porque ya hay una en curso, y ``done`` solo se
-    #: reclama con una regeneración explícita.
-    _AI_SUMMARY_CLAIMABLE = (None, "failed")
+        Pensada para que el usuario se lleve una copia completa **antes**
+        de que la retención purgue el raw -- una vez purgado,
+        ``receivedPath``/``iocs`` dejan de estar disponibles (ver
+        ``get_analysis_path``/``get_analysis_iocs``) y esta exportación ya
+        no puede recuperarlos; salen como ``None`` en vez de hacer fallar
+        la exportación entera, porque el resultado analítico (que
+        ``get_analysis_results`` sí sigue devolviendo) sigue teniendo valor
+        por sí solo.
+        """
+        self.assert_analysis_ownership(analysis_id, user_id)
+        report = self.get_analysis_results(analysis_id)
+
+        try:
+            path = self.get_analysis_path(analysis_id, user_id)
+        except IrisRawMessagePurgedError:
+            path = None
+        try:
+            iocs = self.get_analysis_iocs(analysis_id, user_id)
+        except IrisRawMessagePurgedError:
+            iocs = None
+
+        return {
+            "exportedAt": isoformat_utc(utcnow_naive()),
+            "analysis": report,
+            "receivedPath": path,
+            "iocs": iocs,
+        }
+
+
 
     def generate_ai_summary(self, analysis_id: int, user_id: int,
                             regenerate: bool = False) -> str:
@@ -470,7 +686,7 @@ class IrisManager(TaskTrackingMixin):
         Fire-and-forget: encola y vuelve. El llamante relee
         ``get_analysis_results`` (``aiSummary``) para ver el resultado.
 
-        `B10`: la operación es **idempotente por análisis**. Antes consumía
+        La operación es **idempotente por análisis**. Antes consumía
         cuota y encolaba sin mirar si ya había un resumen o un trabajo en
         curso, así que dos peticiones seguidas —dos clics, un reintento del
         navegador— cobraban dos veces y lanzaban dos generaciones del mismo
@@ -511,11 +727,12 @@ class IrisManager(TaskTrackingMixin):
             return "running"
 
         # La concreta y el techo agregado de IA, en ese orden, para que el 402
-        # nombre lo que el usuario estaba pidiendo.
-        quota_manager = QuotaManager()
+        # nombre lo que el usuario estaba pidiendo. consume_many() las
+        # cobra como una sola operación: si AI_REQUESTS no tiene cupo tras
+        # haber cobrado IRIS_AI_SUMMARIES, la reembolsa antes de relanzar --
+        # antes se quedaba cobrada sin nada que la explicara.
         try:
-            quota_manager.consume(user_id, LimitKey.IRIS_AI_SUMMARIES)
-            quota_manager.consume(user_id, LimitKey.AI_REQUESTS)
+            QuotaManager().consume_many(user_id, [LimitKey.IRIS_AI_SUMMARIES, LimitKey.AI_REQUESTS])
         except Exception:
             # Sin cupo no hay trabajo: se suelta la reserva para que el
             # análisis no se quede en `running` para siempre y el usuario
@@ -534,6 +751,13 @@ class IrisManager(TaskTrackingMixin):
         except Exception:
             # El encolado rechazó el trabajo: nadie lo va a ejecutar, así que
             # ni la reserva ni el cobro tienen sentido.
+            #
+            # Es la razón por la que este sitio se quedó fuera de la outbox
+            # transaccional: la compensación ya existe y
+            # es completa -- el análisis no se queda en `running` y el usuario
+            # recupera su cuota, así que puede reintentar. Lo único que la
+            # outbox añadiría es ejecutar el resumen solo en vez de que el
+            # usuario vuelva a pedirlo.
             self._release_ai_summary(analysis_id)
             self._refund_ai_summary_quota(user_id)
             raise
@@ -591,7 +815,7 @@ class IrisManager(TaskTrackingMixin):
         and leaves ``ai_summary`` as ``NULL`` rather than failing the
         already-finished analysis it's attached to.
 
-        `B10`: además deja el estado en terminal y, si no hubo resumen,
+        Además deja el estado en terminal y, si no hubo resumen,
         devuelve la cuota. Cobrar antes de trabajar es correcto —cobrar
         después permitiría lanzar N generaciones concurrentes con cupo para
         una— pero obliga a devolver el dinero cuando el trabajo no se hace.
@@ -622,23 +846,39 @@ class IrisManager(TaskTrackingMixin):
                     IrisManager._refund_ai_summary_quota(user_id)
 
     def cancel_analysis(self, analysis_id: int, user_id: int) -> bool:
-        """Cancel a running or pending analysis.
+        """Cancela un análisis ``pending`` o ``running``.
 
-        Signals the TaskQueue task to stop and marks the database record
-        as ``cancelled``.
+        Señaliza la tarea de TaskQueue para que pare y marca la fila como
+        ``cancelled`` en la base de datos -- pero solo si el worker no ha
+        alcanzado ya un estado terminal por su cuenta mientras tanto. Que
+        ``_task_queue.cancel()`` lea "sigue en marcha" y que este método
+        escriba en la base de datos no son un único paso atómico: el worker
+        puede llamar a ``_persist_analysis_results()`` y confirmar
+        ``finished`` justo en ese hueco. La escritura real de
+        ``status`` pasa por ``IrisAnalysisRepository.transition_if_state()``,
+        un ``UPDATE ... WHERE status IN (...)`` condicionado que solo uno de
+        los dos escritores en competencia puede ganar, así que una
+        cancelación que llega después de que el análisis ya terminara nunca
+        puede sobreescribir su resultado.
 
         Args:
-            analysis_id: Primary key of the analysis to cancel.
-            user_id:     Owner ID (must match the record's owner).
+            analysis_id: Primary key del análisis a cancelar.
+            user_id: Id del propietario (debe coincidir con el dueño de la fila).
 
         Returns:
-            True if the cancellation was successful.
+            bool: ``True`` si esta llamada transicionó de verdad el análisis
+                a ``cancelled``. ``False`` si no había ninguna tarea activa
+                que cancelar, o si el worker ya había persistido un estado
+                terminal (``finished``/``failed``) para cuando esto intentó
+                escribir -- en ese caso el resultado real del análisis queda
+                intacto, y el hecho de que se pidió cancelar queda igualmente
+                registrado en ``cancel_requested_at`` para quien lo consulte.
 
         Raises:
-            IrisAnalysisNotFoundError: If the analysis does not exist
-                or does not belong to this user.
-            IrisInvalidStateError: If the analysis is not in a
-                cancellable state (``pending`` or ``running``).
+            IrisAnalysisNotFoundError: Si el análisis no existe o no
+                pertenece a este usuario.
+            IrisInvalidStateError: Si el análisis no está en un estado
+                cancelable (``pending`` o ``running``).
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
 
@@ -652,11 +892,34 @@ class IrisManager(TaskTrackingMixin):
             logger.warning(f"No active task found for analysis {analysis_id}")
             return False
 
-        was_cancelled = self._task_queue.cancel(queued_task.id)
-        if was_cancelled:
-            self._update_analysis(analysis_id, status="cancelled", finished_at=utcnow_naive())
-            logger.info(f"Analysis {analysis_id} cancelled by user {user_id}")
-        return was_cancelled
+        if not self._task_queue.cancel(queued_task.id):
+            # RQ ya sabía que el job había terminado -- ni siquiera merece la
+            # pena intentar la transición condicionada.
+            return False
+
+        with UnitOfWork() as uow:
+            repo = IrisAnalysisRepository(uow)
+            # Se registra siempre que se pidió cancelar, gane o no la carrera
+            # contra el worker -- es la traza de la intención del usuario,
+            # independiente del resultado (ver docstring de la columna).
+            uow.session.execute(
+                update(IrisAnalysis)
+                .where(IrisAnalysis.id == analysis_id)
+                .values(cancel_requested_at=utcnow_naive())
+            )
+            transitioned = repo.transition_if_state(
+                analysis_id, list(_CANCELLABLE_STATES),
+                status="cancelled", finished_at=utcnow_naive(),
+            )
+
+        if transitioned:
+            logger.info(f"Análisis {analysis_id} cancelado por el usuario {user_id}")
+        else:
+            logger.info(
+                f"Análisis {analysis_id}: la cancelación llegó tarde -- el worker ya "
+                "había terminado el análisis, su resultado no se sobreescribe."
+            )
+        return transitioned
 
     def delete_analysis(self, analysis_id: int) -> bool:
         """Permanently delete an analysis and its rule results.
@@ -694,6 +957,7 @@ class IrisManager(TaskTrackingMixin):
         self, user_id: int, page: int = 1, per_page: int = 10, *,
         search: str | None = None, verdict: str | None = None,
         status: str | None = None, source: str | None = None,
+        tag: str | None = None, ioc: str | None = None, review: str | None = None,
         sort_by: str = "date", sort_dir: str = "desc",
     ):
         """Return a paginated, formatted list of analyses for a user.
@@ -702,8 +966,10 @@ class IrisManager(TaskTrackingMixin):
             user_id:  Owner of the analyses.
             page:     1‑based page number.
             per_page: Items per page.
-            search/verdict/status/source: Optional filters — see
+            search/verdict/status/source/tag/review: Optional filters — see
                 ``IrisAnalysisRepository.get_by_user_paginated``.
+            ioc: Indicador a buscar; se admite desactivado (``hxxp``,
+                ``[.]``) y se normaliza con ``services/indicators.refang``.
             sort_by/sort_dir: Server-side ordering — see same.
 
         Returns:
@@ -713,11 +979,16 @@ class IrisManager(TaskTrackingMixin):
         items, total = build_repository(IrisAnalysisRepository).get_by_user_paginated(
             user_id, page, per_page,
             search=search, verdict=verdict, status=status, source=source,
+            tag=tag, ioc=refang(ioc) if ioc else None, review=review,
             sort_by=sort_by, sort_dir=sort_dir,
         )
+        reviewed_ids = build_repository(IrisAnalystFeedbackRepository).get_reviewed_ids(
+            [analysis_record.id for analysis_record in items]
+        )
+        policy = current_policy()
         thresholds = {
-            "legitimate": CR.iris_config().legitimate_threshold,
-            "suspicious": CR.iris_config().suspicious_threshold,
+            "legitimate": policy.legitimate_threshold,
+            "suspicious": policy.suspicious_threshold,
         }
         results = [
             {
@@ -726,6 +997,7 @@ class IrisManager(TaskTrackingMixin):
                 "status": analysis_record.status,
                 "failureCode": analysis_record.failure_code,
                 "analysisQuality": analysis_record.analysis_quality,
+                "confidence": analysis_record.confidence,
                 "totalScore": analysis_record.total_score,
                 "verdict": analysis_record.verdict,
                 "startedAt": isoformat_utc(analysis_record.started_at), # type: ignore
@@ -733,6 +1005,8 @@ class IrisManager(TaskTrackingMixin):
                 "connectionId": analysis_record.connection_id,
                 "provider": analysis_record.connection.provider if analysis_record.connection else None,
                 "accountEmail": analysis_record.connection.account_email if analysis_record.connection else None,
+                "tags": [tag.name for tag in analysis_record.tags],
+                "reviewed": analysis_record.id in reviewed_ids,
             }
             for analysis_record in items
         ]
@@ -752,25 +1026,6 @@ class IrisManager(TaskTrackingMixin):
     # INTERNAL
     # =========================================================================
 
-    def _create_analysis_record(self, raw_headers: str, user_id: int, title: str | None = None,
-                                 connection_id: int | None = None,
-                                 source_message_uid: str | None = None) -> int:
-        """Persist a new IrisAnalysis row in ``pending`` state."""
-        analysis = IrisAnalysis(
-            raw_headers=raw_headers,
-            user_id=user_id,
-            title=title.strip()[:120] if title and title.strip() else None,
-            status="pending",
-            connection_id=connection_id,
-            source_message_uid=source_message_uid,
-        )
-        with UnitOfWork() as uow:
-            repo = IrisAnalysisRepository(uow)
-            repo.save(analysis)
-            # Durable antes de encolar: el worker corre en otro proceso.
-            uow.commit_for_handoff()
-        return analysis.id # type: ignore
-
     @staticmethod
     def _validate_headers_pre(raw_headers: str) -> None:
         """Quick pre-check before creating a DB record.
@@ -789,8 +1044,20 @@ class IrisManager(TaskTrackingMixin):
 
     @staticmethod
     def _validate_headers_parsed(parsed: dict) -> None:
-        """Full validation after parsing — ensures the analysis runs on
-        enough data to produce meaningful results."""
+        """
+        Valida que el motor tenga suficientes cabceras para poder
+        correr las reglas. Se llama después de parsear el raw.
+        Se entiende que las cabceras su suficientes si
+        se han encontrado al menos `min_headers` cabeceras válidas.
+
+        `CR.iris_config().min_headers`: Configuración que define el mínimo de cabeceras 
+        válidas requeridas para que el análisis sea considerado válido en `SecOpsConfig.json`.
+
+        Args:
+            parsed: Diccionario de cabeceras parseadas.
+        Raises:
+            IrisInvalidInputError: Si el número de cabeceras parseadas es menor que `min_headers`. 
+        """
         min_h = CR.iris_config().min_headers
         if len(parsed) < min_h:
             raise IrisInvalidInputError(
@@ -810,7 +1077,7 @@ class IrisManager(TaskTrackingMixin):
         1. Marks the analysis as ``running``.
         2. Parses the raw text into both a flat headers dict (legacy
            rules) and a full ``MessageContext`` (body/links/attachments
-           — Fase 2 rules). ``raw_input`` may be a headers-only block or
+           — full-message rules). ``raw_input`` may be a headers-only block or
            a full ``.eml`` message; the context degrades gracefully to
            empty body/links/attachments in the former case.
         3. Runs every registered rule against the message (N1: against
@@ -832,7 +1099,7 @@ class IrisManager(TaskTrackingMixin):
                 self._fail_analysis(analysis_id, classify_failure(e))
                 return
 
-            # B03: parseo, validación y evaluación comparten manejador con la
+            # Parseo, validación y evaluación comparten manejador con la
             # persistencia. Estaban fuera de todo `try`, así que un parser roto
             # o un `.eml` que no lo era dejaban la fila en `running` para
             # siempre: RQ marcaba el job como fallido, pero nadie tocaba la
@@ -854,14 +1121,44 @@ class IrisManager(TaskTrackingMixin):
                 # `_persist_analysis_results`), y leer el registro dos veces
                 # los desalinearía si alguien registrara una regla entremedias.
                 rules_defs = iris_rules.get_rules()
-                chosen = self._evaluate_contexts(analysis_id, context, job, rules_defs)
-                if chosen is None:
-                    return  # cancelado: no es un fallo, no hay nada que persistir
-                verdict, total_score, gate_reasons, results, quality = chosen
+                # La política se fija una vez por análisis y se guarda con él:
+                # un cambio de configuración a mitad no mezcla dos versiones.
+                policy = current_policy()
+                # Las excepciones de confianza del dueño se leen una vez por
+                # análisis, igual que la política: revocar una a mitad no
+                # mezcla dos criterios sobre el mismo mensaje.
+                owner = self.get_analysis(analysis_id)
+                trust_entries = IrisTrustPolicyManager.get_active_entries(owner.user_id) if owner else []
+                with CR.scoring_weight_overrides(policy.weight_overrides):
+                    evaluations = self._evaluate_contexts(analysis_id, context, job, rules_defs, policy,
+                                                          trust_entries)
 
-                self._persist_analysis_results(analysis_id, rules_defs, results,
-                                               verdict, total_score, gate_reasons,
-                                               quality, detector_version(rules_defs))
+                if evaluations is None:
+                    return  # cancelado: no es un fallo, no hay nada que persistir
+
+                winner, secondary, winning_reason = choose_winning_evaluation(
+                    evaluations, _VERDICT_SEVERITY,
+                )
+                verdict, total_score = winner.verdict, winner.total_score
+                confidence = assess_confidence(
+                    winner=winner, 
+                    secondary=secondary,
+                    legitimate_threshold=policy.legitimate_threshold,
+                    suspicious_threshold=policy.suspicious_threshold
+                )
+
+                self._persist_analysis_results(
+                    analysis_id, 
+                    rules_defs,
+                    winner,
+                    detector=detector_version(rules_defs),
+                    secondary=secondary,
+                    winning_reason=winning_reason,
+                    confidence=confidence,
+                    scoring_policy=policy,
+                    indicators=indicator_rows(extract_indicators(
+                        context_of_type(context, winner.context_type))),
+                )
             except Exception as e:
                 logger.error(f"Analysis {analysis_id} failed: {e}", exc_info=True)
                 self._fail_analysis(analysis_id, classify_failure(e))
@@ -872,49 +1169,150 @@ class IrisManager(TaskTrackingMixin):
 
             logger.info(f"Analysis {analysis_id} completed: score={total_score}, verdict={verdict}")
 
-    def _evaluate_contexts(self, analysis_id: int, context, job, rules_defs: List[dict]
-                           ) -> Optional[tuple[str, float, list[str], List[RuleResult], AnalysisQuality]]:
-        """Ejecuta el catálogo de reglas y devuelve la evaluación ganadora.
+    @classmethod
+    def evaluate_raw(cls, raw_input: str, policy: Optional[ScoringPolicy] = None) -> Dict[str, Any]:
+        """Evalúa un mensaje con el motor real, sin crear análisis ni cobrar cuota.
 
-        Extraído de :meth:`_run_analysis` al envolver esa función en un único
-        manejador de ciclo de vida (`B03`): el bucle es la parte larga, y
-        dejarlo en línea dentro del ``try`` habría escondido qué se está
-        protegiendo exactamente.
+        Es el motor que usan el replay y las comparaciones de versiones: el
+        mismo parseo, las mismas reglas, los mismos gates, la misma política
+        de calidad y la misma elección de contexto que un análisis de verdad,
+        pero bajo la política que se le pase.
+
+        Args:
+            raw_input: Cabeceras o ``.eml`` completo.
+            policy: Política con la que puntuar y decidir. Por defecto
+                ``None``: la vigente (``current_policy``).
 
         Returns:
-            La tupla ``(verdict, total_score, gate_reasons, results, quality)``
-            de la evaluación ganadora, o ``None`` si fue cancelada a mitad
-            (que no es un fallo: no se persiste nada y la cancelación ya dejó
-            su propio estado terminal).
+            dict: ``verdict``, ``totalScore``, ``gateReasons``,
+                ``winningContext``, ``rules`` (pares nombre/score del contexto
+                ganador) y ``unevaluatedRules`` (las que fallaron al
+                ejecutarse más las que no tuvieron contenido que inspeccionar).
+
+        Raises:
+            IrisInvalidInputError: Si el texto no tiene cabeceras suficientes.
         """
-        # N1: a "report phishing" forward is safe to unwrap unconditionally
+        policy = policy or current_policy()
+        context = parse_raw_message(raw_input)
+        cls._validate_headers_parsed(context.headers)
+        rules_defs = iris_rules.get_rules()
+        with CR.scoring_weight_overrides(policy.weight_overrides):
+            evaluations = cls()._evaluate_contexts(None, context, None, rules_defs, policy)
+        winner, _, _ = choose_winning_evaluation(evaluations, _VERDICT_SEVERITY)
+        unevaluated = [rule["name"] for rule in winner.quality.failed_rules]
+        unevaluated += list((winner.coverage or {}).get("uncoveredRules") or [])
+        return {
+            "verdict": winner.verdict,
+            "totalScore": winner.total_score,
+            "gateReasons": winner.gate_reasons,
+            "winningContext": winner.context_type,
+            "rules": [(rule_def["name"], result.score)
+                      for rule_def, result in zip(rules_defs, winner.results)],
+            "unevaluatedRules": unevaluated,
+        }
+
+    def evaluate_analysis_under(self, analysis_id: int, user_id: int,
+                                policy: ScoringPolicy) -> Dict[str, Any]:
+        """Qué habría decidido Iris sobre un análisis guardado con otra política.
+
+        Vuelve a evaluar el raw conservado sin crear un análisis nuevo. Con la
+        política reconstruida desde el snapshot del propio análisis
+        (``ScoringPolicy.from_snapshot``) responde a "¿qué decidió la versión
+        con la que se hizo?"; con otra, a "¿qué habría decidido esa?".
+
+        Args:
+            analysis_id: Análisis a reevaluar; debe ser del usuario.
+            user_id: Usuario que pregunta.
+            policy: Política con la que reevaluar.
+
+        Returns:
+            dict: ``analysisId``, lo guardado (``storedVerdict``,
+                ``storedScore``, ``storedScoringVersion``) y lo que decide la
+                política (``verdict``, ``totalScore``, ``gateReasons``,
+                ``scoringVersion``).
+
+        Raises:
+            IrisAnalysisNotFoundError: Si el análisis no existe o no es suyo.
+            IrisRawMessagePurgedError: Si la retención ya purgó el raw.
+        """
+        analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.raw_headers is None:
+            raise IrisRawMessagePurgedError(analysis_id)
+        result = self.evaluate_raw(analysis.raw_headers, policy)
+        return {
+            "analysisId": analysis.id,
+            "storedVerdict": analysis.verdict,
+            "storedScore": analysis.total_score,
+            "storedScoringVersion": analysis.scoring_version,
+            "verdict": result["verdict"],
+            "totalScore": result["totalScore"],
+            "gateReasons": result["gateReasons"],
+            "scoringVersion": policy.version(detector_version(iris_rules.get_rules())),
+        }
+
+    def _evaluate_contexts(self, analysis_id: Optional[int], context, job, rules_defs: List[dict],
+                           policy: Optional[ScoringPolicy] = None,
+                           trust_entries: Optional[List[TrustEntry]] = None) -> Optional[List[ContextEvaluation]]:
+        """Ejecuta el catálogo de reglas sobre cada contexto del mensaje.
+
+        Vive aparte de :meth:`_run_analysis` para que el ``try`` de ciclo de
+        vida de esa función deje ver qué protege: el bucle es la parte larga.
+        Elegir el ganador no se hace aquí sino en
+        ``services/contexts.choose_winning_evaluation``.
+
+        Args:
+            analysis_id: Primary key del análisis (solo para el log); ``None``
+                fuera de un análisis (``evaluate_raw``).
+            context: ``MessageContext`` parseado; si trae ``wrapper_context``,
+                se evalúa también el envoltorio.
+            job: Contexto del job de TaskQueue (cancelación y progreso), o
+                ``None`` fuera de la cola: entonces no hay cancelación ni
+                progreso que informar.
+            rules_defs: Catálogo de reglas, leído una sola vez por análisis.
+            policy: Política con que se puntúa y decide. Por defecto ``None``: la vigente.
+            trust_entries: Excepciones de confianza activas del dueño del
+                análisis (ver ``services/trust.py``). Por defecto ``None``:
+                ninguna, que es lo que usan el replay y las comparaciones.
+
+        Returns:
+            Optional[List[ContextEvaluation]]: Una evaluación por contexto,
+                primero la del interno (``CONTEXT_INNER``) y, en un reenvío,
+                después la del envoltorio (``CONTEXT_WRAPPER``). ``None`` si el
+                análisis se canceló a mitad, que no es un fallo: no se persiste
+                nada y la cancelación ya dejó su propio estado terminal.
+        """
+        # A "report phishing" forward is safe to unwrap unconditionally
         # for a human-submitted analysis, but the same message/rfc822
         # mechanism lets an attacker send their own phishing as the outer
         # message and staple a benign .eml on as an attachment — analyzing
         # only the unwrapped inner message would then score the wrong
         # mail entirely. Evaluate both when a wrapper exists and keep the
         # worse verdict; this matters most for unattended ingestion
-        # (Fase 3+), where there is no human eyeballing the wrapper first.
-        contexts_to_evaluate = [context]
+        # (mailbox ingestion), where there is no human eyeballing the wrapper first.
+        policy = policy or current_policy()
+        contexts_to_evaluate = [(CONTEXT_INNER, context)]
         if context.wrapper_context is not None:
-            contexts_to_evaluate.append(context.wrapper_context)
+            contexts_to_evaluate.append((CONTEXT_WRAPPER, context.wrapper_context))
 
         total_steps = len(rules_defs) * len(contexts_to_evaluate)
         completed_steps = 0
 
-        evaluations: List[tuple[str, float, list[str], List[RuleResult], AnalysisQuality]] = []
-        for evaluated_context in contexts_to_evaluate:
+        evaluations: List[ContextEvaluation] = []
+        for context_type, evaluated_context in contexts_to_evaluate:
             results: List[RuleResult] = []
             named_results: Dict[str, RuleResult] = {}
 
             for rule_def in rules_defs:
-                if job.cancelled():
+                if job is not None and job.cancelled():
                     logger.info(f"Analysis {analysis_id} was cancelled")
                     return None
 
                 try:
-                    rule_input = (evaluated_context if rule_def.get("needs_context")
-                                  else evaluated_context.headers)
+                    rule_input = (
+                        evaluated_context 
+                        if rule_def.get("needs_context")
+                        else evaluated_context.headers
+                    )
                     result = rule_def["func"](rule_input)
                 except Exception as e:
                     logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
@@ -935,123 +1333,180 @@ class IrisManager(TaskTrackingMixin):
                 named_results[rule_def["name"]] = result
 
                 completed_steps += 1
-                job.progress(int((completed_steps / total_steps) * 100))
+                if job is not None:
+                    job.progress(int((completed_steps / total_steps) * 100))
 
-            total_score = self._aggregate_score(rules_defs, results)
-            base_verdict = self._determine_verdict(total_score)
+            # Una excepción de confianza del usuario solo se aplica si el
+            # mensaje demuestra venir de ese remitente, y solo neutraliza las
+            # reglas que cubre: se resuelve antes de puntuar y de los gates
+            # para que ni el score ni los gates de esas reglas la ignoren.
+            trust_record = None
+            trust_entry = find_matching_entry(evaluated_context.headers, trust_entries or [])
+            if trust_entry is not None:
+                is_applied = is_sender_authenticated(named_results)
+                modulated_rules: List[str] = []
+                if is_applied:
+                    results, modulated_rules = apply_trust(rules_defs, results, trust_entry)
+                    named_results = {rule_def["name"]: result for rule_def, result in zip(rules_defs, results)}
+                trust_record = build_trust_record(trust_entry, modulated_rules, is_applied)
+
+            total_score = policy.aggregate(rules_defs, results)
+            base_verdict = policy.verdict_for(total_score)
             verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
 
-            # B05: una regla que revienta no aborta el análisis, pero tampoco
+            # Una regla que revienta no aborta el análisis, pero tampoco
             # puede desaparecer sin dejar rastro. La política conservadora se
             # aplica aquí, junto al resto de gates, para que la degradación se
             # lea entre los demás motivos del veredicto y no en un rincón
             # aparte de la interfaz.
             quality = assess_quality(rules_defs, results)
             verdict, quality_reasons = cap_verdict(verdict, quality)
-            evaluations.append((verdict, total_score, gate_reasons + quality_reasons,
-                                results, quality))
+            evaluations.append(ContextEvaluation(
+                context_type=context_type, verdict=verdict, total_score=total_score,
+                gate_reasons=gate_reasons + quality_reasons + (
+                    [describe_trust_record(trust_record)] if trust_record else []
+                ),
+                results=results, quality=quality,
+                coverage=assess_coverage(evaluated_context, rules_defs),
+                trust_applied=trust_record,
+            ))
 
-        # Worse verdict wins across contexts; on a tie, keep the first
-        # (the unwrapped/inner message — the one ``contexts_to_evaluate``
-        # is ordered by, and the one every other persisted field
-        # describes) rather than the wrapper.
-        chosen = evaluations[0]
-        for evaluation in evaluations[1:]:
-            if _VERDICT_SEVERITY[evaluation[0]] > _VERDICT_SEVERITY[chosen[0]]:
-                chosen = evaluation
-        return chosen
+        return evaluations
 
     @staticmethod
-    def _persist_analysis_results(analysis_id: int, rules_defs: List[dict], results: List[RuleResult],
-                                   verdict: str, total_score: float, gate_reasons: list[str],
-                                   quality: AnalysisQuality, detector: str) -> None:
-        """Persist every rule row and the final analysis state in one transaction.
+    def _persist_analysis_results(analysis_id: int, rules_defs: List[dict],
+                                   winner: ContextEvaluation, detector: str,
+                                   secondary: Optional[ContextEvaluation] = None,
+                                   winning_reason: Optional[str] = None,
+                                   confidence: Optional[ConfidenceAssessment] = None,
+                                   scoring_policy: Optional[ScoringPolicy] = None,
+                                   indicators: Optional[List[tuple]] = None) -> None:
+        """Persiste las filas de regla y el estado final del análisis en una
+        única transacción.
 
-        Previously each rule opened (and committed) its own
-        ``UnitOfWork`` — ~40 commits per analysis, and a cancellation
-        mid-loop left the already-committed rows of a ``cancelled``
-        analysis dangling (C2/C3). One transaction for the whole batch
-        fixes both: it's atomic, and a ``return`` before this point
-        (cancellation) now leaves nothing committed at all.
+        Una sola transacción para todo el lote hace que una cancelación a
+        mitad de bucle (un ``return`` antes de este punto) no deje filas de
+        regla confirmadas de un análisis ``cancelled``.
+
+        Se guardan las reglas de **los dos** contextos de un reenvío, cada
+        fila con su ``context_type``, para que el informe pueda enseñar las
+        del ganador y conservar las otras como contexto secundario. El
+        análisis registra qué contexto ganó, por qué, y un resumen del otro.
+
+        La escritura final de ``status="finished"`` (con score, veredicto y
+        contexto) pasa por ``IrisAnalysisRepository.transition_if_state()``,
+        que solo la aplica si la fila sigue ``running``: así una cancelación
+        que ``cancel_analysis()`` confirme entre la lectura y este commit no
+        se sobreescribe en silencio de vuelta a ``finished``. Las filas de
+        regla se escriben de todos modos: son ciertas pase lo que pase.
+
+        Args:
+            analysis_id: Primary key del análisis.
+            rules_defs: Catálogo evaluado; se empareja por posición con los
+                ``results`` de cada evaluación.
+            winner: Evaluación que decide el veredicto.
+            detector: Marca del catálogo (``detector_version``).
+            secondary: Evaluación del otro contexto de un reenvío. Por defecto
+                ``None`` (el mensaje no era un reenvío).
+            winning_reason: Por qué ganó ``winner``; ``None`` sin reenvío.
+            confidence: Confianza ordinal y motivos de incertidumbre del
+                veredicto. Por defecto ``None``: las columnas de confianza
+                quedan a NULL (se lee como "sin evaluar").
+            scoring_policy: Política con la que se puntuó; se guarda su
+                snapshot y su versión. Por defecto ``None``: esas columnas
+                quedan a NULL.
+            indicators: Pares ``(kind, value)`` del índice de IOCs del
+                contexto ganador (``services/indicators.indicator_rows``).
+                Por defecto ``None``: no se indexa nada.
         """
         with UnitOfWork() as uow:
             rule_repo = IrisRuleResultRepository(uow)
-            for position, (rule_def, rule_result) in enumerate(zip(rules_defs, results)):
-                rule_repo.save(IrisRuleResult(
-                    analysis_id=analysis_id,
-                    rule_name=rule_def["name"],
-                    category=rule_def["category"],
-                    score=rule_result.score,
-                    verdict=rule_result.verdict,
-                    details=rule_result.details,
-                    recommendation=rule_result.recommendation,
-                    position=position,
-                ))
+            for evaluation in (winner, secondary):
+                if evaluation is None:
+                    continue
+                for position, (rule_def, rule_result) in enumerate(zip(rules_defs, evaluation.results)):
+                    rule_repo.save(IrisRuleResult(
+                        analysis_id=analysis_id,
+                        rule_name=rule_def["name"],
+                        rule_id=rule_def.get("rule_id") or None,
+                        severity=rule_def.get("severity") or None,
+                        mitre_techniques=list(rule_def.get("mitre_techniques") or ()) or None,
+                        category=rule_def["category"],
+                        score=rule_result.score,
+                        verdict=rule_result.verdict,
+                        details=rule_result.details,
+                        recommendation=rule_result.recommendation,
+                        position=position,
+                        context_type=evaluation.context_type,
+                        evidence=rule_result.evidence or None,
+                        evidence_unavailable_reason=rule_result.evidence_unavailable_reason,
+                    ))
+
+            indicator_repo = IrisIndicatorRepository(uow)
+            for kind, value in indicators or []:
+                indicator_repo.save(IrisIndicator(analysis_id=analysis_id, kind=kind, value=value))
+
+            secondary_summary = None
+            if secondary is not None:
+                secondary_summary = {
+                    "contextType": secondary.context_type,
+                    "verdict": secondary.verdict,
+                    "totalScore": secondary.total_score,
+                    "analysisQuality": secondary.quality.quality,
+                }
 
             analysis_repo = IrisAnalysisRepository(uow)
-            analysis = analysis_repo.get_by_id(analysis_id)
-            if analysis is None:
-                return
-            analysis.status = "finished"
-            analysis.total_score = total_score
-            analysis.verdict = verdict
-            analysis.gate_reasons = gate_reasons
-            analysis.analysis_quality = quality.quality
-            analysis.failed_rules = quality.failed_rules or None
-            analysis.detector_version = detector
-            analysis.finished_at = utcnow_naive()
-            analysis_repo.update(analysis)
+            transitioned = analysis_repo.transition_if_state(
+                analysis_id, ["running"],
+                status="finished", total_score=winner.total_score, verdict=winner.verdict,
+                gate_reasons=winner.gate_reasons, analysis_quality=winner.quality.quality,
+                failed_rules=winner.quality.failed_rules or None, detector_version=detector,
+                winning_context=winner.context_type, winning_reason=winning_reason,
+                secondary_context=secondary_summary,
+                trust_applied=winner.trust_applied,
+                confidence=confidence.level if confidence else None,
+                coverage=winner.coverage or None,
+                uncertainty_reasons=confidence.reasons if confidence else None,
+                scoring_snapshot=scoring_policy.snapshot(detector) if scoring_policy else None,
+                scoring_version=scoring_policy.version(detector) if scoring_policy else None,
+                finished_at=utcnow_naive(),
+            )
+            if not transitioned:
+                logger.info(
+                    f"Análisis {analysis_id} ya no estaba running al terminar de "
+                    "evaluar las reglas (probablemente cancelado) -- no se sobreescribe."
+                )
 
     @staticmethod
     def _aggregate_score(rules_defs: List[dict], results: List[RuleResult]) -> float:
-        """Combine per-rule results into a single 0–100 score.
+        """Score de 0 a 100 de unos resultados de regla con la política vigente.
 
-        Subtractive model: start at :data:`_CEILING` and add only the
-        *negative* part of each rule's score (``min(0, score)``), so passing
-        a rule never inflates the total. Clamped to ``[0, _CEILING]``.
+        Delega en ``ScoringPolicy.aggregate`` (modelo sustractivo con suelo
+        por familia).
 
-        Recalibración de pesos (§18): before summing, each rule's penalty is
-        attributed to its ``family`` (if any) and the family's total is
-        floored at ``_FAMILY_SCORE_FLOORS[family]`` — a cluster of rules
-        corroborating the same underlying fact can't out-vote its own cap.
-        Rules with no family pass through unfloored.
+        Args:
+            rules_defs: Catálogo evaluado.
+            results: Un ``RuleResult`` por regla, emparejado por posición.
+
+        Returns:
+            float: El score, acotado a ``[0, 100]``.
         """
-        family_penalties: Dict[str, float] = {}
-        unfamilied_penalties = 0.0
-        for rule_def, result in zip(rules_defs, results):
-            penalty = min(0.0, float(result.score))
-            family = rule_def.get("family") or ""
-            if family:
-                family_penalties[family] = family_penalties.get(family, 0.0) + penalty
-            else:
-                unfamilied_penalties += penalty
-
-        capped_total = unfamilied_penalties
-        for family, penalty in family_penalties.items():
-            floor = _FAMILY_SCORE_FLOORS.get(family)
-            capped_total += max(floor, penalty) if floor is not None else penalty
-
-        return max(0.0, _CEILING + capped_total)
+        return current_policy().aggregate(rules_defs, results)
 
     def _determine_verdict(self, total_score: float) -> str:
-        """Map a numeric 0–100 score to a textual verdict.
+        """Veredicto base de un score con los umbrales de la política vigente.
 
-        Thresholds come from ``SecOpsConfig.json`` (0–100 subtractive scale):
-            - ``iris.legitimate_threshold`` (default 80)
-            - ``iris.suspicious_threshold``  (default 55)
+        Delega en ``ScoringPolicy.verdict_for``: los umbrales configurados con
+        el desplazamiento del perfil de sensibilidad. Los gates de alta
+        confianza pueden empeorarlo después (:meth:`_apply_verdict_gates`).
 
-        A clean message stays near 100; each failing rule subtracts. This is
-        only the numeric baseline — high-confidence findings can still push
-        the verdict to a worse category via :meth:`_apply_verdict_gates`.
+        Args:
+            total_score: Score de 0 a 100.
+
+        Returns:
+            str: ``Legitimate``, ``Suspicious`` o ``Phishing``.
         """
-        legitimate = CR.iris_config().legitimate_threshold
-        suspicious = CR.iris_config().suspicious_threshold
-
-        if total_score >= legitimate:
-            return "Legitimate"
-        if total_score >= suspicious:
-            return "Suspicious"
-        return "Phishing"
+        return current_policy().verdict_for(total_score)
 
     @staticmethod
     def _extract_verdict_signals(named_results: Dict[str, RuleResult]) -> Dict[str, Any]:
@@ -1076,7 +1531,7 @@ class IrisManager(TaskTrackingMixin):
         # (the chain itself declares a prior hop broken) is its own gate,
         # see D7 in ROADMAP.md.
         #
-        # B06: la supresión exige además que la cadena la haya validado un
+        # La supresión exige además que la cadena la haya validado un
         # verificador de confianza (`details["verified"]`). Un `cv=pass` a
         # secas es una afirmación del propio mensaje sobre sí mismo, y como
         # Iris no verifica firmas, bastaba escribirlo para desactivar los tres
@@ -1091,7 +1546,7 @@ class IrisManager(TaskTrackingMixin):
         dmarc_fail = verdict_is("DMARC", "fail") and not arc_pass
         align_fail = verdict_is("Domain Alignment", "fail") and not arc_pass
 
-        # G-A (forense, recalibración de pesos): un authserv-id que reclama
+        # Auth Results Provenance (forense, recalibración de pesos): un authserv-id que reclama
         # "pass" pero no aparece en ningún salto de la propia cadena
         # Received del mensaje es una línea forjada por el remitente --
         # cierra el bypass de confiar ciegamente en Authentication-Results
@@ -1164,13 +1619,14 @@ class IrisManager(TaskTrackingMixin):
             and any(finding.get("type") == "brand_in_subdomain" for finding in (subdomain.details.get("findings") or []))
         )
 
-        # G-B (red team, máxima prioridad): lookalike del dominio del
+        # Recipient Domain Lookalike (red team, máxima prioridad): lookalike del dominio del
         # DESTINATARIO, no de una marca -- el vector BEC nº1, hoy invisible
         # porque Lookalike Sender Domain solo compara contra
         # `canonical_brands`.
         recipient_lookalike = verdict_is("Recipient Domain Lookalike", "fail")
 
-        # G-C (red team): el display name ES una dirección de otro dominio
+        # Display Name Foreign Address (red team): el display name ES una
+        # dirección de otro dominio
         # (`"ceo@acme.com" <attacker@evil.com>`). Escala a Phishing solo
         # cuando esa dirección falsa suplanta la propia organización
         # destinataria o una marca conocida -- si no, queda en Suspicious.
@@ -1180,17 +1636,17 @@ class IrisManager(TaskTrackingMixin):
             display_foreign_fail and bool(display_foreign.details.get("impersonates_target"))
         )
 
-        # G-D (red team): TOAD/callback -- teléfono + lenguaje de pago sin
+        # TOAD Callback Pattern (red team): teléfono + lenguaje de pago sin
         # enlaces/adjuntos/hilo previo, una clase de ataque hoy invisible.
         toad_callback = verdict_is("TOAD Callback Pattern", "fail")
 
-        # G-E (red team): urgencia fuerte combinada con un enlace del cuerpo
+        # External Login Link (red team): urgencia fuerte combinada con un enlace del cuerpo
         # a un dominio ajeno al remitente -- aproxima el "primo autenticado"
         # (dominio propio, auth limpia, marca fuera de la lista) sin
         # depender de `canonical_brands`.
         external_login_link = verdict_is("External Login Link", "fail")
 
-        # Comprobación forense adicional (§5): aproximación offline de
+        # Comprobación forense adicional: aproximación offline de
         # coherencia HELO -- ruidosa en solitario (nombres de host varían
         # mucho de forma legítima), solo se combina con un fallo de auth.
         origin_helo_mismatch = verdict_is("Origin HELO Coherence", "fail")
@@ -1396,7 +1852,7 @@ class IrisManager(TaskTrackingMixin):
         tarea viva en TaskQueue que lo actualice tras reiniciar, y el registro
         se queda así para siempre. Se llama una vez al arrancar la API.
 
-        `B04`: antes se conservaba el análisis **solo** si su tarea estaba
+        Antes se conservaba el análisis **solo** si su tarea estaba
         exactamente en ``pending``. Un job ``running`` puede estar avanzando en
         otro proceso —los workers son procesos aparte, y reiniciar la API no
         los para—, así que ese criterio marcaba como fallidos análisis que
@@ -1436,7 +1892,7 @@ class IrisManager(TaskTrackingMixin):
         ``failure`` es opcional solo para no romper a un llamador que ya no
         tenga la excepción a mano; en la práctica todos los caminos de
         ``_run_analysis`` la traen, porque un ``failed`` sin motivo es
-        justamente lo que `B03` venía a quitar de en medio.
+        justamente lo que el manejo de fallos vino a quitar de en medio.
 
         No se propaga ninguna excepción desde aquí: esto es el último
         recurso de la tarea, y un fallo escribiendo el fallo solo puede

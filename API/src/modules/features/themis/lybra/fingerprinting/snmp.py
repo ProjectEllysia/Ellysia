@@ -1,5 +1,4 @@
-"""El dissector SNMP — Fase N/Ronda 1 (roadmap §6.3), sobre la sonda UDP de la
-Fase T mínima que este mismo cambio añade a ``transport.py``.
+"""El dissector SNMP — sobre la sonda UDP mínima de ``transport.py``.
 
 Lee la respuesta de un GetRequest SNMP v2c para el OID
 ``1.3.6.1.2.1.1.1.0`` (``sysDescr.0``) — el codificador del mensaje vive en
@@ -30,12 +29,12 @@ Qué NO soporta, deliberadamente:
 
 Lee un escalar y nada más.
 
-**Y desde L21 lo interpreta con un feed de patrones por fabricante.** El
-roadmap justificaba la prioridad de SNMP con una frase muy concreta —*"su
-``sysDescr`` trae producto y versión enteros en una sola lectura"*— y este
-dissector descartaba la versión a propósito, porque una regex genérica sobre
-texto libre envenenaría el matcher de CPE. La cautela era correcta; lo que
-dejaba sin cobrar es el mayor argumento de valor de SNMP.
+**La versión se interpreta con un feed de patrones por fabricante, nunca con
+una regex genérica.** El mayor argumento de valor de SNMP es que su
+``sysDescr`` trae producto y versión enteros en una sola lectura; extraer esa
+versión con una regex genérica sobre texto libre envenenaría el matcher de
+CPE, así que el dissector solo la reconoce cuando un patrón concreto de
+fabricante la confirma.
 
 ``feeds/sysdescr_patterns.json`` resuelve las dos cosas a la vez: patrones
 **por fabricante**, no un extractor general. Un formato concreto de un
@@ -44,8 +43,8 @@ SNMP es donde vive la superficie que más se le escapa a un escaneo por banner
 —switches, routers, impresoras, SAIs, cámaras—, justo los activos que un
 cliente no sabe que tiene.
 
-Las tres reglas del feed, que son las que evitan el envenenamiento que motivó
-la decisión original, están escritas en el propio fichero. La tercera es la que
+Las tres reglas del feed, que son las que evitan el envenenamiento del
+matcher de CPE, están escritas en el propio fichero. La tercera es la que
 sostiene a las otras dos: cada patrón entra con una muestra, y el test
 comprueba que casa con la suya y que **no** casa con la de ningún otro.
 """
@@ -75,9 +74,9 @@ _SYSDESCR_OID_TLV = bytes.fromhex("06082b06010201010100")
 # arriba: fingerprinting/snmp.py -> lybra/feeds/.
 _BUNDLED_SYSDESCR_PATTERNS = Path(__file__).parent.parent / "feeds" / "sysdescr_patterns.json"
 
-# El ``qod`` de una versión extraída por un patrón específico del producto: la
-# tabla del §10 del roadmap le asigna 80, por encima del 70 de un CPE genérico
-# y por debajo de una evidencia confirmada activamente.
+# El ``qod`` de una versión extraída por un patrón específico del producto: 80,
+# por encima del 70 de un CPE genérico y por debajo de una evidencia
+# confirmada activamente.
 QOD_VENDOR_PATTERN = 80
 
 
@@ -349,6 +348,6 @@ class SnmpDissector(Dissector):
             fingerprint.version,
             self.label,
             # Un patrón específico del producto vale más que la constante de
-            # fingerprint (tabla del §10); un sysDescr sin reconocer, no.
+            # fingerprint; un sysDescr sin reconocer, no.
             qod=QOD_VENDOR_PATTERN if fingerprint.matched_pattern else QOD_FINGERPRINT,
         )

@@ -1,4 +1,4 @@
-"""Unit tests for NucleiResultProcessor (JSONL parsing, roadmap Fase U1)."""
+"""Unit tests for NucleiResultProcessor (JSONL parsing)."""
 
 import json
 

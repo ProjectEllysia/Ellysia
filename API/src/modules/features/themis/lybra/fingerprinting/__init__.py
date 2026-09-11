@@ -1,8 +1,8 @@
-"""Lybra's own service fingerprinting — the identification layer (Fase F).
+"""Lybra's own service fingerprinting — the identification layer.
 
 Instead of trusting ``nmap -sV`` blindly, this package identifies a service's
 product and version on its own terms. One module per protocol, chosen for the
-best value-for-effort in the roadmap:
+best value for the effort it costs to support:
 
 ``http_apis``
     Las APIs de administración que hablan HTTP y publican su versión en un
@@ -18,8 +18,9 @@ best value-for-effort in the roadmap:
     versión repetida en rutas de assets—, más el ``<title>``, un hash del
     favicon y el feed de firmas de tecnología al estilo Wappalyzer. Cada
     lectura registra de qué nivel salió, y ese nivel decide el ``qod`` del
-    hallazgo. Hasta L18 la única fuente era ``Server``, que es justo la que
-    cualquier despliegue fortificado suprime.
+    hallazgo. La cascada existe porque ``Server`` es justo la cabecera que
+    cualquier despliegue fortificado suprime: apoyarse solo en ella dejaría
+    ciego cualquier objetivo bien configurado.
 
 ``ssh``
     The identification banner plus **HASSH** — a fingerprint of the algorithm
@@ -29,7 +30,7 @@ best value-for-effort in the roadmap:
 ``tls``
     A single-handshake hygiene check — negotiated protocol version, self-signed
     and expiry status of the certificate. **No JARM: archivado**, con la razón
-    escrita en el docstring del módulo y en la Fase F del roadmap.
+    escrita en el docstring del módulo.
 
 ``postgres``
     La primera base de datos que **negocia** en vez de ofrecer un banner: un
@@ -60,7 +61,7 @@ best value-for-effort in the roadmap:
     contrario de un banner de texto libre. No da versión, y no se inventa una.
 
 ``ftp``, ``mail`` (SMTP/IMAP/POP3), ``mysql``, ``redis_probe``, ``vnc``
-    Fase N's non-HTTP protocols — each volunteers its identity unprompted
+    Non-HTTP protocols whose services volunteer their identity unprompted
     right after a bare TCP connect, no negotiation needed to read it.
 
 ``smb``
@@ -72,14 +73,14 @@ best value-for-effort in the roadmap:
     docstring para las simplificaciones documentadas.
 
 ``udp_services``
-    El resto de la superficie UDP (L22): DNS, NTP, NetBIOS-NS, mDNS, IKE y el
+    El resto de la superficie UDP: DNS, NTP, NetBIOS-NS, mDNS, IKE y el
     SQL Server Browser. Cada uno llega con el consumidor de su fila de
     ``UDP_PROBES``, que es la regla con la que esa tabla nació. Ahí viven los
     servicios que no aparecen en ningún escaneo TCP y los que se usan para
     amplificar ataques contra terceros.
 
 ``snmp``
-    Fase N/Ronda 1's first UDP protocol — a ``sysDescr.0`` GetRequest (the
+    The first UDP protocol here — a ``sysDescr.0`` GetRequest (the
     encoder lives in ``transport.py``, imported back here; see the module's
     own docstring for why). La versión sale de un feed de patrones **por
     fabricante** (``feeds/sysdescr_patterns.json``) y nunca de una regex
@@ -98,26 +99,25 @@ best value-for-effort in the roadmap:
     the manager.
 
 
-That said, a service found by Lybra's own transport (Fase T, no Nmap
+That said, a service found by Lybra's own transport layer (no Nmap
 involved) never had a Nmap reading to defer to in the first place — it carries
 no product/version at all. For that case, and only that case,
 ``LybraEngineManager._fingerprint_services`` uses a dissector's output to
-fill the gap: without it, the version matcher (Fase 1) would have nothing to
+fill the gap: without it, the version matcher would have nothing to
 look up and a self-discovery-only scan would never find a single CVE. The
 result still goes in at the same low-confidence, unconfirmed tier a Nmap CPE
 match would (``qod=70``) — this closes a blind spot, it does not raise
 confidence beyond what the matcher already assigns any version-based guess.
 
-**JARM está archivado, no pendiente** (L24): su valor es comparativo, y un
+**JARM está archivado, no pendiente**: su valor es comparativo, y un
 hash que no coincida bit a bit con el de la implementación de referencia no es
 una identificación peor sino ninguna — comprobar esa coincidencia exige un
 laboratorio con varias pilas TLS que no existe aquí. La decisión, con qué haría
-falta para reabrirla, está en ``tls.py`` y en la Fase F del roadmap.
+falta para reabrirla, está en ``tls.py``.
 
-El fingerprinting de sistema operativo (que el roadmap valora bajo) sigue
-aplazado, y con VNC más allá de su banner de versión y RPC sigue siendo
-territorio del oráculo —Nmap— por la valoración de prioridad-3 del propio
-roadmap.
+El fingerprinting de sistema operativo sigue aplazado por su bajo valor
+frente al esfuerzo que exige, y VNC más allá de su banner de versión, junto
+con RPC, siguen siendo territorio del oráculo —Nmap.
 """
 
 from __future__ import annotations

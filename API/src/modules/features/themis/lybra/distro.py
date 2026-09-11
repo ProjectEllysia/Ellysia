@@ -1,13 +1,13 @@
 """De qué distribución es este paquete, y sólo cuando se puede saber.
 
-La verificación de *backports* (Fase O) necesita saber contra qué proveedor
+La verificación de *backports* necesita saber contra qué proveedor
 preguntar: si Debian ya parcheó ``apache2`` en su ``2.4.49-1~deb11u1``, esa
 respuesta no vale para un Apache compilado a mano ni para uno de Alpine.
 
-El roadmap dejó esta pieza sin resolver y enumeró tres salidas: aplicar sólo
-cuando el inventario del agente dé la distribución, inferirla del banner cuando
-lo diga, o aplicar el descenso cuando **todas** las distribuciones candidatas
-coincidan en que está parcheado.
+Hay tres formas de resolverlo: aplicar sólo cuando el inventario del agente
+dé la distribución, inferirla del banner cuando lo diga, o aplicar el
+descenso cuando **todas** las distribuciones candidatas coincidan en que
+está parcheado.
 
 **La tercera se descarta**, y conviene decir por qué: un paquete compilado
 desde el código fuente no pertenece a ninguna distribución, así que "todas
@@ -24,8 +24,8 @@ y su ``confirmed=false``. Callar es la respuesta correcta cuando no se sabe.
 La señal más fuerte no es el banner sino la **revisión del propio paquete**:
 ``1:2.4.49-1ubuntu1`` sólo lo escribe Ubuntu, ``2.4.49-1~deb11u1`` sólo Debian
 (y dice hasta la versión), ``2.4.49-r0`` sólo Alpine, ``2.4.49-1.el8`` sólo la
-familia de Red Hat. Eso ya lo extrae :func:`~.kb.split_distro_version` desde
-#267 — aquí sólo se lee.
+familia de Red Hat. Eso ya lo extrae :func:`~.kb.split_distro_version`; aquí
+sólo se lee.
 """
 
 from __future__ import annotations

@@ -136,7 +136,7 @@ export function fmtWatts(watts) {
 }
 
 /**
- * Clasifica una lectura de potencia en sus cuatro estados posibles (P20, P29).
+ * Clasifica una lectura de potencia en sus cuatro estados posibles.
  *
  * La distinción entre medición y estimación se hace siempre sobre
  * `estimated`, nunca sobre el contenido de `source`: el servidor acepta
@@ -211,17 +211,17 @@ const CLASSIFICATION_LABELS = {
   projected: 'Proyección',
 }
 
-/** Rótulo en castellano de una clasificación de procedencia (P24). */
+/** Rótulo en castellano de una clasificación de procedencia. */
 export function powerPeriodLabel(classification) {
   return CLASSIFICATION_LABELS[classification] || classification
 }
 
 /**
- * Compone los textos de un periodo de consumo (P25) a partir de la
+ * Compone los textos de un periodo de consumo a partir de la
  * respuesta de ``GET /hygeia/assets/<id>/power-summary``.
  *
  * Función pura y testeable aparte del componente: formatea energía y coste,
- * y traduce la clasificación de procedencia (P24) a lo que se pinta en la
+ * y traduce la clasificación de procedencia a lo que se pinta en la
  * ficha, sin decidir dónde ni cómo se muestra.
  *
  * @param {object|null} period - Un bloque ``day``/``week``/``month``/``monthProjected``.

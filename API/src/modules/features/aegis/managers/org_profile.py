@@ -1,6 +1,5 @@
 """
-AegisOrgProfileManager — perfil de organización (D3 en
-plans/deuda-tecnica-y-calidad.md).
+AegisOrgProfileManager — perfil de organización.
 
 Los valores estables de generación (empresa, contacto, tono, tamaño,
 jurisdicción, productos vigilados): devolverlos con defaults si el usuario

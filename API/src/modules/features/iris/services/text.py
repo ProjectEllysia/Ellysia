@@ -1,7 +1,6 @@
 """
-Utilidades de texto/dominio compartidas entre las reglas de Iris (D6 en
-plans/deuda-tecnica-y-calidad.md — antes mezclado con wordlists.py en un
-único shared.py de 957 líneas).
+Utilidades de texto/dominio compartidas entre las reglas de Iris (antes
+mezcladas con wordlists.py en un único shared.py de 957 líneas).
 
 Extracción de dominios/hosts, distancia de edición, homóglifos, y el
 análisis de URL completo (``analyze_url``) que usan tanto Body Links (sobre
@@ -16,16 +15,20 @@ utilidad, vive aquí; si necesitan un dataset, vive en ``wordlists.py``.
 
 from __future__ import annotations
 
+import ipaddress
 import re
+from functools import lru_cache
 from typing import Optional
 from urllib.parse import urlparse
 
+from publicsuffixlist import PublicSuffixList
+
+from .idn import assess_domain, skeleton
 from .wordlists import (
     canonical_brands,
     esp_tracker_domains,
     free_provider_domains,
     homoglyph_table,
-    multi_level_tlds,
     multitenant_hosting_domains,
     shortener_domains,
     url_phishing_keywords,
@@ -45,35 +48,93 @@ def extract_domain(email: str) -> Optional[str]:
     return match.group(1).lower() if match else None
 
 
+@lru_cache(maxsize=1)
+def _public_suffix_list() -> PublicSuffixList:
+    """Public Suffix List empaquetada, solo la sección ICANN.
+
+    Solo ICANN a propósito: la sección privada declara sufijos como
+    ``github.io`` o ``blogspot.com``, y con ella cada inquilino de un servicio
+    compartido sería una «organización» distinta del servicio. Eso es lo que
+    necesitaría una cookie, no la comparación de alineamiento organizativo que
+    hacen estas reglas; los servicios multiinquilino se tratan aparte
+    (``wordlists.multitenant_hosting_domains``). La lista viene dentro del
+    paquete ``publicsuffixlist``: nunca se descarga en ejecución.
+
+    Returns:
+        PublicSuffixList: Instancia compartida.
+    """
+    return PublicSuffixList(only_icann=True)
+
+
+def _normalize_host(domain: Optional[str]) -> str:
+    """Host en minúsculas y sin puntos al principio ni al final."""
+    return (domain or "").strip().strip(".").lower()
+
+
+def _is_ip_literal(host: str) -> bool:
+    """Si un host es una dirección IP (una IP no tiene dominio registrable)."""
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return True
+
+
+def public_suffix(domain: Optional[str]) -> str:
+    """Sufijo público de un host según la Public Suffix List (ICANN).
+
+    ``mail.hacienda.gob.es`` -> ``gob.es``; ``shop.example.app`` -> ``app``.
+
+    Args:
+        domain: Host en ASCII (punycode) o en Unicode.
+
+    Returns:
+        str: El sufijo; cadena vacía si no hay host o si es una IP. Un TLD
+            que la lista no conoce se trata como sufijo de un nivel.
+    """
+    host = _normalize_host(domain)
+    if not host or _is_ip_literal(host):
+        return ""
+    return _public_suffix_list().publicsuffix(host) or host.rsplit(".", 1)[-1]
+
+
 def registrable_domain(domain: Optional[str]) -> Optional[str]:
-    """Reduce a hostname to its registrable domain (best-effort, no PSL).
+    """Dominio registrable de un host, según la Public Suffix List (ICANN).
 
     ``mail.corp.paypal.com`` -> ``paypal.com``; ``a.b.example.co.uk`` ->
-    ``example.co.uk``.  Good enough to compare organisational alignment.
+    ``example.co.uk``; ``mail.hacienda.gob.es`` -> ``hacienda.gob.es``. Es la
+    unidad con la que se compara si dos dominios son de la misma organización.
+
+    Args:
+        domain: Host en ASCII (punycode) o en Unicode.
+
+    Returns:
+        Optional[str]: El dominio registrable; el propio host si es una IP o
+            no tiene sufijo por delante (``localhost``); ``None`` si no hay host.
     """
-    if not domain:
+    host = _normalize_host(domain)
+    if not host:
         return None
-    labels = domain.strip(".").lower().split(".")
-    if len(labels) < 2:
-        return domain.lower()
-    last_two = ".".join(labels[-2:])
-    if last_two in multi_level_tlds() and len(labels) >= 3:
-        return ".".join(labels[-3:])
-    return last_two
+    if _is_ip_literal(host):
+        return host
+    return _public_suffix_list().privatesuffix(host) or host
 
 
 def registrable_label(domain: str) -> str:
-    """Return the owner-identifying label of the registrable domain.
+    """Etiqueta que identifica al dueño del dominio registrable.
 
-    ``mail.paypal.com`` -> ``paypal``; ``a.example.co.uk`` -> ``example``.
+    ``mail.paypal.com`` -> ``paypal``; ``a.example.co.uk`` -> ``example``;
+    ``mail.hacienda.gob.es`` -> ``hacienda``.
+
+    Args:
+        domain: Host en ASCII (punycode) o en Unicode.
+
+    Returns:
+        str: La primera etiqueta del dominio registrable; cadena vacía si no
+            hay host.
     """
-    labels = domain.strip(".").lower().split(".")
-    if len(labels) < 2:
-        return labels[0] if labels else ""
-    last_two = ".".join(labels[-2:])
-    if last_two in multi_level_tlds() and len(labels) >= 3:
-        return labels[-3]
-    return labels[-2]
+    registrable = registrable_domain(domain)
+    return registrable.split(".")[0] if registrable else ""
 
 
 def extract_display_name(from_header: str) -> str:
@@ -94,7 +155,7 @@ def url_host(url: str) -> Optional[str]:
     """Hostname (lowercase, sin credenciales ni puerto) de una URL, o None.
 
     Soporta netloc IPv6 entre corchetes (``[::1]:8080``) — un ``.split(":")``
-    ingenuo lo destroza y deja solo ``"["`` (N4).
+    ingenuo lo destroza y deja solo ``"["``.
     """
     try:
         parsed = urlparse(url)
@@ -116,7 +177,7 @@ _HEX_IP_HOST_RE = re.compile(r"^0x[0-9a-f]{1,8}$", re.IGNORECASE)
 
 
 def is_obfuscated_ip_host(host: str) -> bool:
-    """True cuando *host* es un literal IPv4 disfrazado de decimal u hex (N4).
+    """True cuando *host* es un literal IPv4 disfrazado de decimal u hex.
 
     ``_URL_IP_HOST_RE`` (dotted-quad) no detecta estas formas — un enlace de
     phishing puede usarlas para evadir el chequeo de "IP literal" a simple vista.
@@ -202,8 +263,20 @@ def is_plausible_typo(a: str, b: str) -> bool:
 
 
 def normalize_homoglyphs(text: str) -> str:
-    """Sustituye homóglifos comunes (0->o, 1->l, $->s…) y pasa a minúsculas."""
-    return text.lower().translate(homoglyph_table())
+    """Lee un texto como lo leería un humano, para compararlo con marcas.
+
+    Primero el esqueleto visual de Unicode (cirílico, griego, tildes,
+    anchura completa… -> su letra latina, ver ``services/idn.skeleton``) y
+    después la tabla de sustituciones ASCII de la configuración (0->o,
+    1->l, $->s…).
+
+    Args:
+        text: Texto en cualquier escritura.
+
+    Returns:
+        str: El texto normalizado, en minúsculas.
+    """
+    return skeleton(text).translate(homoglyph_table())
 
 
 def find_brand_in_subdomain(domain: str) -> Optional[dict]:
@@ -223,9 +296,8 @@ def find_brand_in_subdomain(domain: str) -> Optional[dict]:
     brands = canonical_brands()
     if registrable_label(domain) in brands:
         return None  # genuinely the brand's own domain (e.g. mail.github.com)
-    pre_labels = (
-        labels[:-3] if ".".join(labels[-2:]) in multi_level_tlds() else labels[:-2]
-    )
+    # Todo lo que queda a la izquierda del dominio registrable.
+    pre_labels = labels[:-len(registrable_domain(domain).split("."))]
     for lbl in pre_labels:
         for token in re.split(r"[^a-z0-9]+", lbl):
             if token in brands:
@@ -336,8 +408,14 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
         })
         score -= 20
 
-    if any(label.startswith("xn--") for label in host.split(".")):
-        findings.append({"type": "punycode", "href": href})
+    # Un IDN legítimo (un solo alfabeto, sin imitar una marca) no penaliza:
+    # lo sospechoso es la mezcla de alfabetos o el homógrafo de una marca.
+    idn = assess_domain(host, brands)
+    if idn.is_suspicious:
+        findings.append({
+            "type": "punycode", "href": href, "unicode_host": idn.unicode_domain,
+            "idn_verdict": idn.verdict.value, "imitates": idn.brand,
+        })
         score -= 8
 
     if _URL_IP_HOST_RE.match(host) or is_obfuscated_ip_host(host):
@@ -404,7 +482,7 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
     # normal on a company's own site. An insecure (http) page asking for
     # credentials on top of that is the textbook harvesting-page pattern.
     #
-    # N3: that "known brand's domain" carve-out is also what let a
+    # That "known brand's domain" carve-out is also what let a
     # credential-harvest form hosted on ``docs.google.com`` or
     # ``sharepoint.com`` through with zero findings — those are
     # multi-tenant hosting services where the path/subdomain is

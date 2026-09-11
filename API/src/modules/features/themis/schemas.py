@@ -21,8 +21,8 @@ class NiktoScanRequestSchema(Schema):
 
 class NucleiScanRequestSchema(Schema):
     target = fields.String(required=True)
-    # Perfil acotado por defecto (roadmap Fase U1, punto 1): sin esto, Nuclei
-    # con el feed completo contra un solo host son miles de peticiones. "info"
+    # Perfil acotado por defecto: sin esto, Nuclei con el feed completo
+    # contra un solo host son miles de peticiones. "info"
     # queda fuera del default a propósito — son miles de plantillas de
     # tech-detect y, al ser confirmed=True sin CVSS, el suelo de
     # score_finding las subiría todas a MEDIUM.
@@ -38,17 +38,12 @@ class NucleiScanRequestSchema(Schema):
 
 class LybraScanRequestSchema(Schema):
     # Un solo modo por HTTP: Lybra descubre los puertos del objetivo con su
-    # propio transporte (Fase T). El modo de payload externo existe en el
+    # propio transporte. El modo de payload externo existe en el
     # manager, pero no se expone aquí — llega en proceso desde Hygeia.
-    #
-    # Hasta L52 había un segundo modo, ``sourceScanId``: analizar los servicios
-    # que un escaneo Nmap previo ya había descubierto. Retirado con el resto
-    # del acoplamiento con escáneres de terceros, junto al flag ``deep`` que
-    # lanzaba Nmap/Nikto/Nuclei como corroboradores.
     target = fields.String(required=True)
     ports = fields.String()
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
-    # La doble puerta del modo agresivo (L40): esta petición explícita del
+    # La doble puerta del modo agresivo: esta petición explícita del
     # usuario es sólo la mitad. El manager sólo la honra cuando el objetivo
     # está además en el registro de autorización — un registro no autoriza
     # cualquier cosa contra el objetivo, sólo el escaneo pasivo.
@@ -65,9 +60,10 @@ class UnresolvedProductsQuerySchema(Schema):
 
 
 class FindingStateRequestSchema(Schema):
-    # ``accepted`` y ``false_positive`` dicen cosas opuestas y hasta L35
-    # compartían casilla: aceptar un riesgo es "esto es real, lo asumo";
-    # desmentirlo es "esto no es real, el motor se equivocó". Un informe que
+    # ``accepted`` y ``false_positive`` dicen cosas opuestas y por eso son
+    # estados distintos en vez de compartir casilla: aceptar un riesgo es
+    # "esto es real, lo asumo"; desmentirlo es "esto no es real, el motor se
+    # equivocó". Un informe que
     # cuenta los segundos como riesgos aceptados miente sobre la postura de
     # seguridad. ``fixed`` y ``regressed`` no están porque los pone el ciclo de
     # vida al comparar escaneos: dejarlos escribir aquí permitiría falsear el
@@ -116,7 +112,7 @@ class ResultsQuerySchema(Schema):
     type = fields.String(load_default="all", validate=validate.OneOf([scan_type.value for scan_type in ScanType] + ["all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
-    # Fase I, solo con type=lybra: acota la lista a los escaneos originados por
+    # Solo con type=lybra: acota la lista a los escaneos originados por
     # el inventario de un activo de Hygeia. Omitirlo devuelve los escaneos
     # lanzados desde el panel de Themis (los de agente se ven por agente, no
     # mezclados en la feed general).

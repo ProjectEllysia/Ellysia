@@ -142,8 +142,9 @@ def test_past_due_within_grace_keeps_the_plan(
 def test_limits_carry_no_usage_counters_yet(
     client, seeded_plans, regular_user, auth_headers
 ):
-    """Frontera con la fase 2: aquí solo se dice cuánto incluye el plan, nunca
-    cuánto se lleva gastado. El día que aparezca "used", que sea a propósito."""
+    """/plans/me solo dice cuánto incluye el plan, nunca cuánto se lleva
+    gastado -- eso vive aparte, en /plans/me/usage. Que "used" no aparezca
+    aquí es a propósito, no un olvido."""
     body = client.get("/plans/me", headers=auth_headers(regular_user)).get_json()
     for limit in body["limits"].values():
         assert set(limit) == {"value", "period"}

@@ -50,6 +50,9 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", "oZrC9aq99vdSaSW5nk55KNJFr9flChUBjs1
 # Clave Fernet distinta de MFA_ENCRYPTION_KEY (purposes no intercambiables,
 # ver shared._crypto) para el refresh token del conector de buzón de Iris.
 os.environ.setdefault("IRIS_MAILBOX_ENCRYPTION_KEY", "wMNiTz_4azXsQb3lJg8Fvv0hpRbPz50TV1ZivCMvx_E=")
+# Idem para el raw MIME/cabeceras de IrisAnalysis, separado en su propia
+# fila cifrada (IrisRawMessage) por M09/B19.
+os.environ.setdefault("IRIS_RAW_MESSAGE_ENCRYPTION_KEY", "PttUWa9N_8cdsC4t113HiqFmxjCYYTIoplsFkz5U71Y=")
 os.environ.setdefault("ACCESS_TOKEN_EXPIRY_MINUTES", "30")
 os.environ.setdefault("REFRESH_TOKEN_EXPIRY_DAYS", "7")
 os.environ.setdefault("FLASK_ENV", "development")
@@ -242,7 +245,7 @@ def _redis_always_unavailable():
 # 3-ter. Ningún socket sale de loopback
 # ---------------------------------------------------------------------------
 
-# Los objetivos reales declarados (L48) los comparten este sello y el banco de
+# Los objetivos reales declarados los comparten este sello y el banco de
 # paridad. Se cargan por ruta y no por nombre porque ``conftest`` es ambiguo:
 # hay más de uno en el árbol (``tests/postgres/conftest.py``) y cuál gana
 # depende del orden de recolección.
@@ -281,7 +284,7 @@ def _no_outbound_sockets():
 
     Se corta en ``socket.connect``, no sonda a sonda, porque es el único punto
     por el que pasan todas: urllib (``HttpProbe``), TLS, las sesiones TCP
-    crudas de la Fase N y el descubrimiento de puertos. Un ``ConnectionRefused``
+    crudas del descubrimiento de puertos. Un ``ConnectionRefused``
     instantáneo es indistinguible de un host inalcanzable para el código bajo
     test — que trata cualquier ``OSError`` como "no hay servicio" — solo que
     sin la espera.
@@ -289,7 +292,7 @@ def _no_outbound_sockets():
     Loopback sí se permite: los tests de herald levantan un servidor SMTP real
     (aiosmtpd) en 127.0.0.1 y tienen que poder hablar con él.
 
-    Y, desde L48, también las direcciones que el operador haya declarado en
+    También se permiten las direcciones que el operador haya declarado en
     ``LYBRA_REAL_TARGETS`` (ver :func:`declared_real_targets`). Es una lista
     blanca de direcciones concretas, resueltas antes de instalar el sello, no
     un interruptor que lo apague: sin esa variable —el caso por defecto, y el
@@ -694,9 +697,9 @@ def set_plan_limits(app, _unlimited_default_plan):
 def make_subscription(app, seeded_plans):
     """Factory que da de alta una suscripción para un usuario.
 
-    Sin llamar a ningún manager: en esta fase no existe todavía quien mueva
-    suscripciones (eso es el ciclo de vida de la fase 6), así que los tests
-    escriben la fila directamente.
+    Sin llamar a ``SubscriptionManager``: escribe la fila directamente para
+    dejar el test libre de tener que pasar por las seis operaciones del ciclo
+    de vida cuando lo único que le importa es partir de un estado ya dado.
     """
     from src.modules.accounts.model import Subscription
 

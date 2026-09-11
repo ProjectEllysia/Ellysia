@@ -1,9 +1,9 @@
 """
 IrisReportManager — ciclo de vida de IrisDocument y generación asíncrona
-del informe PDF (D4 en ``plans/deuda-tecnica-y-calidad.md``).
+del informe PDF.
 
 El CRUD y la comprobación de propiedad los comparte con Themis vía
-``DocumentManager`` (A3); aquí queda solo lo propio de Iris: crear el
+``DocumentManager``; aquí queda solo lo propio de Iris: crear el
 ``IrisDocument`` y renderizar su PDF con :class:`IrisPDFCreator`.
 """
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 class IrisReportManager(DocumentManager):
     """Manager for IrisDocument lifecycle and async PDF report generation.
 
-    CRUD/ownership are shared with Themis via ``DocumentManager`` (A3); this
+    CRUD/ownership are shared with Themis via ``DocumentManager``; this
     class keeps only what is really Iris-specific: creating an
     ``IrisDocument`` and rendering its PDF via :class:`IrisPDFCreator`.
     """
@@ -63,7 +63,7 @@ class IrisReportManager(DocumentManager):
             uow.commit_for_handoff()
         return document.id  # type: ignore
 
-    # get_documents_by_parent: usa el default de DocumentManager (A9).
+    # get_documents_by_parent: usa el default de DocumentManager.
 
     def generate_report(self, analysis_id: int, user_id: int) -> int:
         """Create an IrisDocument and start async PDF generation.

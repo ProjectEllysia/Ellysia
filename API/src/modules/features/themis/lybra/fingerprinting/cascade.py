@@ -2,7 +2,7 @@
 
 Todos los predicados de aplicabilidad del motor deciden con la misma fórmula:
 *el nombre del servicio está en esta lista, o el puerto está en este conjunto*.
-Y cuando el descubrimiento es propio (Fase T, sin Nmap), el nombre del servicio
+Y cuando el descubrimiento es propio (sin Nmap), el nombre del servicio
 sale de ``WELL_KNOWN_PORTS``, que es **otra tabla de puertos**. Es decir: en el
 camino de autodescubrimiento, la decisión era puramente el número de puerto.
 
@@ -35,8 +35,9 @@ que la ruta rápida de los servicios en su puerto de siempre no paga nada:
 
 La lista de intentos es **dato derivado del registro**, no una lista paralela:
 un dissector nuevo entra en la cascada por declarar sus dos capacidades, sin
-que este módulo cambie. Ése es justamente el error que #272 documentó — un mapa
-escrito a mano que se quedó con dos entradas mientras el módulo definía once.
+que este módulo cambie. Una lista paralela es justo lo que se queda atrás: hubo
+un mapa escrito a mano que se quedó con dos entradas mientras el módulo definía
+once.
 """
 
 from __future__ import annotations

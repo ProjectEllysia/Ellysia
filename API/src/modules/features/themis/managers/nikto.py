@@ -1,5 +1,5 @@
-"""NiktoScanManager — extraido de thirdparty_scans_managers.py (D2 en
-plans/deuda-tecnica-y-calidad.md: ver el docstring de nmap.py para el porqué)."""
+"""NiktoScanManager — extraído del antiguo thirdparty_scans_managers.py (ver el
+docstring de nmap.py para el porqué)."""
 
 import logging
 from typing import Optional
@@ -64,21 +64,16 @@ class NiktoScanManager(ScanManager):
             # programado entra por este mismo método.
             QuotaManager().consume(user_id, LimitKey.THEMIS_THIRDPARTY_SCANS)
 
-            scan = self._create_scan_record(
+            scan = self._create_scan_and_dispatch(
                 target=target_domain,
                 user_id=user_id,
                 programed_scan_id=programed_scan_id,
+                func=NiktoScanManager.execute_nikto_scan,
+                job_name="NiktoScan",
+                trailing_args=(target_domain, timeout),
+                timeout=timeout,
             )
             scan_id = scan.id
-
-            self._task_queue.submit(
-                func=NiktoScanManager.execute_nikto_scan,
-                args=(scan_id, target_domain, timeout),
-                name=f"NiktoScan-{scan_id}",
-                category=self.TASK_CATEGORY,
-                external_id=self.external_id_for(scan_id),
-                timeout=timeout + self._scan_timeout_margin,
-            )
 
             logger.info(f"Escaneo Nikto {scan_id} iniciado")
             return scan_id # type: ignore
@@ -117,8 +112,8 @@ class NiktoScanManager(ScanManager):
 
         scan_repo.persist_nikto_results(scan, host, incidents_data)
 
-        # Additive: also record each incident as a normalized Finding, so a
-        # future cross-scanner correlation pass (Fase 6) has something to fuse
+        # Additive: also record each incident as a normalized Finding, so
+        # cross-scanner correlation has something to fuse
         # against Lybra/Nuclei findings on the same host. Does not replace
         # the NiktoIncident write above — the PDF report and history charts
         # still read that (see lybra/adapters.py for why).

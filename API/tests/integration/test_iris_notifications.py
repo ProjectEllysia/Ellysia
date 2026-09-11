@@ -1,25 +1,43 @@
-"""Tests de integración de IrisPhishingNotifyManager: el correo de alerta
-cuando la ingesta automática de buzón clasifica un correo como Phishing.
+"""Tests de integración de las notificaciones de Iris: el correo de alerta
+cuando la ingesta automática de buzón clasifica un correo como Phishing
+(``IrisPhishingNotifyManager``), el digest diario que agrupa los que no
+eran de alta confianza (``IrisDigestNotifyManager``), y los dos avisos
+operativos -- reautenticación (``IrisReauthNotifyManager``) y
+conexión atascada (``IrisStuckSyncNotifyManager``).
 
-Cubre el contrato del aviso: solo análisis de buzón con veredicto Phishing
-notifican (los manuales los pidió el propio usuario, que ya ve el informe),
-el correo va al dueño del análisis y su contenido incluye el asunto — el
-mismo que ahora se usa como título del análisis.
+Cubre el contrato del aviso de phishing: solo análisis de buzón con
+veredicto Phishing notifican (los manuales los pidió el propio usuario, que
+ya ve el informe), el correo va al dueño del análisis y su contenido incluye
+el asunto -- el mismo que ahora se usa como título del análisis. Y el de
+las preferencias: un veredicto de alta confianza (``total_score`` en o por debajo de
+``iris.criticalPhishingScoreThreshold``, 20 por defecto) siempre notifica al
+momento; uno por encima de ese umbral respeta el silenciado temporal y el
+digest diario del usuario.
 """
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest import mock
 
 import pytest
 
 import src.modules.features.iris.managers.notifications as notifications_mod
+import src.modules.system.taskqueue.dispatcher as dispatcher_mod
 from src.modules.features.iris.managers import IrisManager
-from src.modules.features.iris.managers.notifications import IrisPhishingNotifyManager
-from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection
-from src.modules.features.iris.repositories import IrisAnalysisRepository, IrisMailboxConnectionRepository
+from src.modules.features.iris.managers.notifications import (
+    IrisDigestNotifyManager, IrisNotificationPreferenceManager,
+    IrisPhishingNotifyManager, IrisReauthNotifyManager, IrisStuckSyncNotifyManager,
+)
+from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection, IrisNotificationPreference
+from src.modules.features.iris.repositories import (
+    IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisNotificationPreferenceRepository,
+)
 from src.modules.infrastructure import UnitOfWork
-from src.modules.shared import encrypt_at_rest
+from src.modules.infrastructure.session import init_request_session, shutdown_request_session
+from src.modules.shared import encrypt_at_rest, utcnow_naive
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 
 pytestmark = pytest.mark.integration
 
@@ -32,15 +50,29 @@ class _FakeTaskQueue:
         self.submitted.append(kwargs)
 
 
-def _save_connection(app, user_id: int) -> int:
+class _RejectingQueue:
+    """Simula Redis caído justo en el instante del encolado."""
+
+    def submit(self, **kwargs):
+        raise ConnectionError("Redis no disponible")
+
+
+def _use_queue(monkeypatch, queue) -> None:
+    """Hace que ``OutboxDispatcher`` publique contra ``queue`` en vez de Redis."""
+    monkeypatch.setattr(dispatcher_mod.TaskQueue, "get_instance", staticmethod(lambda: queue))
+
+
+def _save_connection(app, user_id: int, **overrides) -> int:
+    defaults = dict(
+        user_id=user_id, provider="gmail", account_email="victim@example.com",
+        scopes="gmail.metadata",
+        refresh_token="token",
+        status="active",
+    )
+    defaults.update(overrides)
     with app.app_context():
         with UnitOfWork() as uow:
-            connection = IrisMailboxConnection(
-                user_id=user_id, provider="gmail", account_email="victim@example.com",
-                scopes="gmail.metadata",
-                refresh_token_enc=encrypt_at_rest("token", purpose="iris_mailbox"),
-                status="active",
-            )
+            connection = IrisMailboxConnection(**defaults)
             IrisMailboxConnectionRepository(uow).save(connection)
             return connection.id
 
@@ -53,9 +85,30 @@ def _save_analysis(app, user_id: int, *, verdict: str, connection_id=None, title
                 raw_headers="From: attacker@evil.tk\nSubject: Tu factura\n",
                 user_id=user_id, status="finished", verdict=verdict,
                 total_score=total_score, title=title, connection_id=connection_id,
+                finished_at=utcnow_naive(),
             )
             IrisAnalysisRepository(uow).save(analysis)
             return analysis.id
+
+
+def _save_preference(app, user_id: int, **overrides) -> None:
+    with app.app_context():
+        with UnitOfWork() as uow:
+            IrisNotificationPreferenceRepository(uow).save(
+                IrisNotificationPreference(user_id=user_id, **overrides)
+            )
+
+
+def _reload_preference(app, user_id: int) -> IrisNotificationPreference:
+    with app.app_context():
+        with UnitOfWork() as uow:
+            return IrisNotificationPreferenceRepository(uow).get_by_user_id(user_id)
+
+
+def _reload_connection(app, connection_id: int) -> IrisMailboxConnection:
+    with app.app_context():
+        with UnitOfWork() as uow:
+            return IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
 
 
 # ------------------------------------------------------------------- enqueue
@@ -165,3 +218,403 @@ def test_phishing_trigger_never_raises_when_queue_is_down(app, regular_user):
             analysis = IrisAnalysisRepository(uow).get_by_id(analysis_id)
             assert analysis is not None
             assert analysis.status == "finished"
+
+
+# =====================================================================
+# Preferencias de notificación: silenciado, digest y los dos avisos operativos.
+
+# ------------------------------------------- IrisNotificationPreferenceManager
+
+def test_get_or_default_returns_defaults_without_persisting(app, regular_user):
+    preference = IrisNotificationPreferenceManager.get_or_default(regular_user.id)
+
+    assert preference.digest_enabled is False
+    assert preference.muted_until is None
+    assert preference.notify_reauth_required is True
+    assert preference.notify_sync_stuck is True
+    assert _reload_preference(app, regular_user.id) is None
+
+
+def test_update_creates_the_row_on_first_touch(app, regular_user):
+    with app.app_context():
+        IrisNotificationPreferenceManager.update(regular_user.id, digest_enabled=True)
+
+    reloaded = _reload_preference(app, regular_user.id)
+    assert reloaded is not None
+    assert reloaded.digest_enabled is True
+    assert reloaded.notify_reauth_required is True  # sin tocar -- valor por defecto
+
+
+def test_update_only_touches_fields_that_were_passed(app, regular_user):
+    _save_preference(app, regular_user.id, digest_enabled=True, notify_sync_stuck=False)
+
+    with app.app_context():
+        IrisNotificationPreferenceManager.update(regular_user.id, notify_reauth_required=False)
+
+    reloaded = _reload_preference(app, regular_user.id)
+    assert reloaded.digest_enabled is True  # sin tocar
+    assert reloaded.notify_sync_stuck is False  # sin tocar
+    assert reloaded.notify_reauth_required is False  # el único cambio
+
+
+def test_muted_for_minutes_sets_a_future_muted_until(app, regular_user):
+    before = utcnow_naive()
+    with app.app_context():
+        IrisNotificationPreferenceManager.update(regular_user.id, muted_for_minutes=60)
+
+    reloaded = _reload_preference(app, regular_user.id)
+    assert reloaded.muted_until is not None
+    assert reloaded.muted_until > before + timedelta(minutes=59)
+
+
+def test_muted_for_minutes_zero_clears_an_active_mute(app, regular_user):
+    _save_preference(app, regular_user.id, muted_until=utcnow_naive() + timedelta(hours=1))
+
+    with app.app_context():
+        IrisNotificationPreferenceManager.update(regular_user.id, muted_for_minutes=0)
+
+    assert _reload_preference(app, regular_user.id).muted_until is None
+
+
+# ------------------------- IrisPhishingNotifyManager respeta las preferencias
+
+def test_critical_phishing_ignores_an_active_mute(app, regular_user):
+    """total_score=10 está por debajo del umbral de alta confianza (20) --
+    debe notificar de inmediato aunque el usuario esté silenciado."""
+    connection_id = _save_connection(app, regular_user.id)
+    analysis_id = _save_analysis(app, regular_user.id, verdict="Phishing",
+                                 connection_id=connection_id, total_score=10.0)
+    _save_preference(app, regular_user.id, muted_until=utcnow_naive() + timedelta(hours=1))
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisPhishingNotifyManager._run_notify(analysis_id)
+
+    mailer.send.assert_called_once()
+
+
+def test_critical_phishing_ignores_digest_enabled(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id)
+    analysis_id = _save_analysis(app, regular_user.id, verdict="Phishing",
+                                 connection_id=connection_id, total_score=10.0)
+    _save_preference(app, regular_user.id, digest_enabled=True)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisPhishingNotifyManager._run_notify(analysis_id)
+
+    mailer.send.assert_called_once()
+
+
+def test_non_critical_phishing_is_silenced_while_muted(app, regular_user):
+    """total_score=35 está por encima del umbral de alta confianza (20) --
+    un silenciado activo lo suprime por completo."""
+    connection_id = _save_connection(app, regular_user.id)
+    analysis_id = _save_analysis(app, regular_user.id, verdict="Phishing",
+                                 connection_id=connection_id, total_score=35.0)
+    _save_preference(app, regular_user.id, muted_until=utcnow_naive() + timedelta(hours=1))
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisPhishingNotifyManager._run_notify(analysis_id)
+
+    mailer.send.assert_not_called()
+
+
+def test_non_critical_phishing_sends_once_mute_has_expired(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id)
+    analysis_id = _save_analysis(app, regular_user.id, verdict="Phishing",
+                                 connection_id=connection_id, total_score=35.0)
+    _save_preference(app, regular_user.id, muted_until=utcnow_naive() - timedelta(minutes=1))
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisPhishingNotifyManager._run_notify(analysis_id)
+
+    mailer.send.assert_called_once()
+
+
+def test_non_critical_phishing_is_deferred_to_the_digest(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id)
+    analysis_id = _save_analysis(app, regular_user.id, verdict="Phishing",
+                                 connection_id=connection_id, total_score=35.0)
+    _save_preference(app, regular_user.id, digest_enabled=True)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisPhishingNotifyManager._run_notify(analysis_id)
+
+    mailer.send.assert_not_called()
+
+
+def test_non_critical_phishing_sends_normally_without_preferences(app, regular_user):
+    """Sin fila de preferencias (usuario que nunca las ha tocado), un
+    Phishing no crítico se comporta como si no hubiera preferencias: se notifica."""
+    connection_id = _save_connection(app, regular_user.id)
+    analysis_id = _save_analysis(app, regular_user.id, verdict="Phishing",
+                                 connection_id=connection_id, total_score=35.0)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisPhishingNotifyManager._run_notify(analysis_id)
+
+    mailer.send.assert_called_once()
+
+
+# ------------------------------------------------- IrisReauthNotifyManager
+
+def test_reauth_notify_sends_to_connection_owner(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id, status="reauth_required")
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisReauthNotifyManager._run_notify(connection_id)
+
+    mailer.send.assert_called_once()
+    message = mailer.send.call_args.args[0]
+    assert "victim@example.com" in message.subject
+
+
+def test_reauth_notify_skips_if_connection_recovered(app, regular_user):
+    """El job pudo tardar en ejecutarse -- si para entonces la conexión ya
+    volvió a estar activa (el usuario la reconectó), no hay nada que avisar."""
+    connection_id = _save_connection(app, regular_user.id, status="active")
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisReauthNotifyManager._run_notify(connection_id)
+
+    mailer.send.assert_not_called()
+
+
+def test_reauth_notify_respects_preference(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id, status="reauth_required")
+    _save_preference(app, regular_user.id, notify_reauth_required=False)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisReauthNotifyManager._run_notify(connection_id)
+
+    mailer.send.assert_not_called()
+
+
+def test_mark_reauth_required_notifies_only_on_the_transition(app, regular_user, monkeypatch):
+    """Ver IrisMailboxManager._mark_reauth_required: solo la primera llamada
+    (active -> reauth_required) debe encolar el aviso; reintentos
+    posteriores mientras sigue en ese estado no deben repetirlo."""
+    from src.modules.features.iris.managers.mailbox import IrisMailboxManager
+
+    connection_id = _save_connection(app, regular_user.id, status="active")
+
+    fake_queue = _FakeTaskQueue()
+    _use_queue(monkeypatch, fake_queue)
+    with app.app_context():
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado")
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado otra vez")
+
+    reauth_jobs = [j for j in fake_queue.submitted if j["category"] == "iris.notify"]
+    assert len(reauth_jobs) == 1
+    assert reauth_jobs[0]["args"] == (connection_id,)
+    assert reauth_jobs[0]["name"] == f"IrisReauthNotify-{connection_id}"
+
+
+def test_reauth_notice_survives_redis_down_at_enqueue(app, regular_user, monkeypatch):
+    """El guardia ya no puede suprimir el aviso para siempre.
+
+    ``status="reauth_required"`` es lo que impide avisar dos veces. Antes se
+    confirmaba y el encolado venía después; si Redis fallaba ahí, las llamadas
+    siguientes veían el estado ya puesto y no volvían a encolar. Ahora el
+    estado y la fila de outbox viajan en el mismo commit.
+    """
+    from src.modules.features.iris.managers.mailbox import IrisMailboxManager
+
+    connection_id = _save_connection(app, regular_user.id, status="active")
+    _use_queue(monkeypatch, _RejectingQueue())
+
+    with app.app_context():
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado")
+        # Seguir en reauth_required no añade una segunda intención de avisar.
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado otra vez")
+
+        with UnitOfWork() as uow:
+            pending = TaskDispatchRepository(uow).get_pending()
+            assert [row.name for row in pending] == [f"IrisReauthNotify-{connection_id}"]
+
+        recovery_queue = _FakeTaskQueue()
+        _use_queue(monkeypatch, recovery_queue)
+        assert OutboxDispatcher.dispatch_pending() == 1
+
+    assert _reload_connection(app, connection_id).status == "reauth_required"
+    assert [j["name"] for j in recovery_queue.submitted] == [f"IrisReauthNotify-{connection_id}"]
+
+
+def test_reauth_from_a_failing_request_persists_state_and_publishes_once(
+    app, regular_user, monkeypatch,
+):
+    """``update_connection`` y ``list_folders`` llaman a ``_mark_reauth_required``
+    dentro de una request y lanzan justo después, así que el teardown hace
+    rollback de todo lo que no se haya confirmado ya.
+
+    Antes eso deshacía el cambio a ``reauth_required`` mientras el job ya
+    estaba encolado, que al ejecutarse veía la conexión ``active`` y descartaba
+    el aviso. Y el rollback tampoco puede devolver a ``pending`` una fila de
+    outbox ya publicada: el barrido la republicaría y el dueño recibiría el
+    aviso dos veces.
+    """
+    from src.modules.features.iris.managers.mailbox import IrisMailboxManager
+
+    connection_id = _save_connection(app, regular_user.id, status="active")
+    queue = _FakeTaskQueue()
+    _use_queue(monkeypatch, queue)
+
+    with app.test_request_context():
+        init_request_session()
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado")
+        shutdown_request_session(exception=ValueError("La conexión necesita reautorización"))
+
+    assert _reload_connection(app, connection_id).status == "reauth_required"
+    assert len(queue.submitted) == 1
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            assert TaskDispatchRepository(uow).get_pending() == []
+        assert OutboxDispatcher.dispatch_pending() == 0
+
+    assert len(queue.submitted) == 1
+
+
+# ---------------------------------------------- IrisStuckSyncNotifyManager
+
+def test_stuck_sync_notify_sends_to_connection_owner(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=utcnow_naive())
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisStuckSyncNotifyManager._run_notify(connection_id)
+
+    mailer.send.assert_called_once()
+
+
+def test_stuck_sync_notify_skips_a_connection_that_already_recovered(app, regular_user):
+    """Un aviso que sale tarde no debe decir "atascado" de un buzón sano.
+
+    La outbox puede publicar el aviso mucho después de detectar el atasco (si
+    Redis estaba caído, lo publica el barrido cuando vuelve). Si entretanto un
+    sync limpio vació la cola, ``_finish_sync`` ya limpió
+    ``stuck_alert_sent_at`` y el aviso no corresponde.
+    """
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=None)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisStuckSyncNotifyManager._run_notify(connection_id)
+
+    mailer.send.assert_not_called()
+
+
+def test_stuck_sync_notify_respects_preference(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=utcnow_naive())
+    _save_preference(app, regular_user.id, notify_sync_stuck=False)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisStuckSyncNotifyManager._run_notify(connection_id)
+
+    mailer.send.assert_not_called()
+
+
+# --------------------------------------------------- IrisDigestNotifyManager
+
+def test_digest_notify_skips_if_not_enabled(app, regular_user):
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisDigestNotifyManager._run_notify(regular_user.id)
+
+    mailer.send.assert_not_called()
+
+
+def test_digest_notify_advances_last_sent_without_sending_when_nothing_to_report(app, regular_user):
+    _save_preference(app, regular_user.id, digest_enabled=True)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisDigestNotifyManager._run_notify(regular_user.id)
+
+    mailer.send.assert_not_called()
+    assert _reload_preference(app, regular_user.id).digest_last_sent_at is not None
+
+
+def test_digest_notify_sends_one_email_with_all_non_critical_analyses(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id)
+    _save_preference(app, regular_user.id, digest_enabled=True)
+    first_id = _save_analysis(app, regular_user.id, verdict="Phishing", connection_id=connection_id,
+                              title="Factura pendiente", total_score=30.0)
+    second_id = _save_analysis(app, regular_user.id, verdict="Phishing", connection_id=connection_id,
+                               title="Verifica tu cuenta", total_score=40.0)
+    # Un crítico no debe colarse en el digest -- ya se notificó al momento.
+    _save_analysis(app, regular_user.id, verdict="Phishing", connection_id=connection_id,
+                   title="Alerta urgente", total_score=5.0)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisDigestNotifyManager._run_notify(regular_user.id)
+
+    mailer.send.assert_called_once()
+    message = mailer.send.call_args.args[0]
+    assert "2" in message.subject
+    assert f"#{first_id}" in message.html_body
+    assert f"#{second_id}" in message.html_body
+    assert _reload_preference(app, regular_user.id).digest_last_sent_at is not None
+
+
+def test_digest_notify_does_not_advance_last_sent_when_send_fails(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id)
+    _save_preference(app, regular_user.id, digest_enabled=True)
+    _save_analysis(app, regular_user.id, verdict="Phishing", connection_id=connection_id,
+                   total_score=30.0)
+
+    mailer = mock.Mock()
+    mailer.send.side_effect = RuntimeError("smtp is down")
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisDigestNotifyManager._run_notify(regular_user.id)
+
+    assert _reload_preference(app, regular_user.id).digest_last_sent_at is None
+
+
+def test_digest_notify_only_includes_analyses_since_last_digest(app, regular_user):
+    connection_id = _save_connection(app, regular_user.id)
+    _save_preference(app, regular_user.id, digest_enabled=True,
+                     digest_last_sent_at=utcnow_naive())
+    old_id = _save_analysis(app, regular_user.id, verdict="Phishing", connection_id=connection_id,
+                            total_score=30.0)
+    # Retrocede el finished_at del análisis "viejo" para que quede antes del
+    # último digest -- _save_analysis lo pone a "ahora" por defecto.
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = IrisAnalysisRepository(uow)
+            old_analysis = repo.get_by_id(old_id)
+            old_analysis.finished_at = utcnow_naive() - timedelta(days=2)
+            repo.update(old_analysis)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisDigestNotifyManager._run_notify(regular_user.id)
+
+    mailer.send.assert_not_called()

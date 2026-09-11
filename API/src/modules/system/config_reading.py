@@ -9,9 +9,11 @@ import json
 import logging
 import os
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
-from functools import wraps
+from functools import cache, wraps
 from pathlib import Path
 from typing import Optional, TypeVar, get_origin
 
@@ -615,8 +617,7 @@ class ScribeConfig(_StrategySelection):
 
     max_input_tokens: int = 24000
     """Tope de tokens estimados del prompt (system + examples + user) que
-    ``AIGenerator.digest`` deja pasar antes de invocar la estrategia (Issue
-    #118).
+    ``AIGenerator.digest`` deja pasar antes de invocar la estrategia.
 
     Sin esto, un writer de dominio (p.ej. ``LybraAIWriter`` con un scan de
     muchos hallazgos) podía generar un payload que OpenAI rechazaba con un
@@ -727,21 +728,48 @@ def get_smtp_environment() -> dict[str, str]:
 
 # Los cuatro escáneres de Themis, cada uno con su propio bloque bajo
 # ``features.themis.scanners``: mismos ``prompts`` y ``colorPalette``, más los
-# ajustes que cada herramienta necesite. OpenVAS salió de esta lista al
-# retirarse (roadmap §7/§6.3, Ronda 2 — E2).
+# ajustes que cada herramienta necesite. OpenVAS se retiró del producto y no
+# aparece en esta lista.
 #
-# Derivado de ScanType (A1) en vez de repetido a mano: un escáner nuevo que
+# Derivado de ScanType en vez de repetido a mano: un escáner nuevo que
 # se registre en el enum aparece aquí solo, en vez de quedarse fuera hasta
-# que alguien se acuerde de tocar esta tupla también. Import perezoso
-# (dentro de la función, no a nivel de módulo): config_reading.py lo importa
-# casi todo el proyecto muy pronto, y no debe depender en su superficie
-# global de un modelo de un módulo de features concreto.
-def _themis_scanner_values() -> tuple:
+# que alguien se acuerde de tocar esta tupla también.
+@cache
+def _themis_scanner_values() -> tuple[str, ...]:
+    """Devuelve los valores de ``ScanType``: los escáneres de Themis con bloque de config.
+
+    El import de ``ScanType`` ocurre en la primera llamada, nunca al cargar este
+    módulo. Cargar ``themis/model.py`` ejecuta antes ``features/themis/__init__.py``,
+    que arrastra managers, ``accounts`` y ``users``; y casi todo el proyecto importa
+    ``config_reading`` muy pronto, así que hacerlo al cargar cierra un ciclo de imports.
+
+    Returns:
+        tuple[str, ...]: Los valores del enum (``"nmap"``, ``"nikto"``, ``"lybra"``,
+            ``"nuclei"``), en el orden en que se declaran.
+    """
     from src.modules.features.themis.model import ScanType
     return tuple(scan_type.value for scan_type in ScanType)
 
 
-THEMIS_SCANNERS = _themis_scanner_values()
+def __getattr__(name: str):
+    """Resuelve ``CR.THEMIS_SCANNERS`` al pedirlo, en vez de al cargar el módulo.
+
+    Mantiene el nombre público de siempre sin pagar el import de Themis en la
+    carga (ver ``_themis_scanner_values``). Dentro de este fichero se llama a
+    ``_themis_scanner_values()`` directamente: un nombre suelto no pasa por aquí.
+
+    Args:
+        name: Atributo del módulo que no se encontró por la vía normal.
+
+    Returns:
+        tuple[str, ...]: Los escáneres de Themis, si ``name`` es ``"THEMIS_SCANNERS"``.
+
+    Raises:
+        AttributeError: Para cualquier otro nombre.
+    """
+    if name == "THEMIS_SCANNERS":
+        return _themis_scanner_values()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 @config_block("features.themis")
@@ -870,13 +898,13 @@ class LybraConfig:
     """Interruptores de operador del motor propio.
 
     Ambos van a ``True`` por defecto: el registro de objetivos autorizados por
-    usuario (roadmap §6, ``AuthorizedTargetManager``) es la verdadera puerta —
+    usuario (``AuthorizedTargetManager``) es la verdadera puerta —
     Lybra solo toca un objetivo que el llamante haya autorizado explícitamente,
     valga lo que valga este flag. Existen como interruptor de emergencia para
     desactivar la funcionalidad en todo el despliegue.
 
     Los **parámetros de red** —timeouts, concurrencia, ritmo, presupuestos—
-    viven aparte, en :class:`LybraEngineConfig` (L39): un interruptor de
+    viven aparte, en :class:`LybraEngineConfig`: un interruptor de
     despliegue y un dial de afinado son cosas distintas, y mezclarlos haría el
     bloque ilegible en cuanto pasara de dos campos.
     """
@@ -890,19 +918,14 @@ class LybraConfig:
 class LybraEngineConfig:  # pylint: disable=too-many-instance-attributes
     """Los diales de red del motor: cuánto tarda, cuánta carga mete y qué mira.
 
-    Hasta L39 cada uno de estos valores era un literal en la firma de un
-    constructor —``concurrency=200``, ``timeout=2.0``, ``min_interval=0.2``— y
-    el manager instanciaba las sondas sin argumentos, así que no había forma de
-    tocarlos sin editar código. OpenVAS lleva veinte años teniendo *scan
-    configs* por una razón: un escaneo contra un enlace lento, contra un
+    Son configurables porque un escaneo contra un enlace lento, contra un
     appliance frágil o contra un rango grande necesita otros números, y quien
-    opera el escáner es quien sabe cuáles.
+    opera el escáner es quien sabe cuáles — la misma razón por la que OpenVAS
+    lleva veinte años ofreciendo *scan configs*.
 
-    **Los valores por defecto son exactamente los que estaban a fuego**, así
-    que el cambio es invisible hasta que alguien mueve un dial. Cada campo tiene
-    un consumidor real en ``managers/lybra/engine.py`` — no hay ningún dial que
-    no llegue a una sonda, porque un parámetro que nadie lee es peor que uno a
-    fuego: parece configurable y no lo es.
+    Cada campo tiene un consumidor real en ``managers/lybra/engine.py`` — no
+    hay ningún dial que no llegue a una sonda, porque un parámetro que nadie
+    lee es peor que uno a fuego: parece configurable y no lo es.
     """
 
     # --- Descubrimiento TCP (transport.AsyncConnectScanner / scan_ports_sync)
@@ -929,7 +952,7 @@ class LybraEngineConfig:  # pylint: disable=too-many-instance-attributes
     Agotarlo **no** marca nada como cerrado: los puertos que no han contestado
     se dan por no observados, que es lo que ya eran."""
 
-    # --- Ritmo por host (checks.HostRateLimiter) y paralelismo (L23)
+    # --- Ritmo por host (checks.HostRateLimiter) y paralelismo
     rate_limit_interval: float = 0.2
     """Intervalo mínimo, en segundos, entre dos peticiones al mismo
     host. Es la cortesía con el objetivo, y manda por encima del pool."""
@@ -970,8 +993,8 @@ class LybraEngineConfig:  # pylint: disable=too-many-instance-attributes
 
     # --- DSL de checks: payloads/fuzzing (checks.CheckRuntime)
     max_payload_expansions: int = 25
-    """Tope duro de peticiones que un check con ``payloads`` puede expandir
-    (L30). Un payload es una lista de valores —veinte nombres de fichero de
+    """Tope duro de peticiones que un check con ``payloads`` puede expandir.
+    Un payload es una lista de valores —veinte nombres de fichero de
     copia de seguridad, pongamos— que se sustituyen en la petición, y sin un
     tope el producto cartesiano de varias listas convierte un check en un
     barrido de fuerza bruta de horas. El motor corta en cuanto alcanza este
@@ -982,12 +1005,12 @@ class LybraEngineConfig:  # pylint: disable=too-many-instance-attributes
 @config_block("features.themis.scanners.lybra.ingest")
 @dataclass(frozen=True)
 class LybraIngestConfig:
-    """Ingesta de plantillas de Nuclei al runtime propio de Lybra (Fase R)."""
+    """Ingesta de plantillas de Nuclei al runtime propio de Lybra."""
 
     enabled: bool = False
     """**Por defecto desactivado, y a conciencia.** El código está construido y
     probado, pero la decisión de si la ingesta merece la pena la toma el número
-    del censo de la Fase U4 (``tools/nuclei_template_census.py``), que solo puede
+    del censo (``tools/nuclei_template_census.py``), que solo puede
     medirse en una máquina con el feed instalado. Hasta que ese número exista, el
     interruptor existe pero no se activa: el flag decide la *activación*, no la
     existencia del código."""
@@ -1024,7 +1047,7 @@ class NucleiConfig:
     )
     """Perfil acotado por defecto cuando el caller no especifica severidades.
 
-    Excluye ``info`` a propósito (roadmap Fase U1, punto 1): son miles de
+    Excluye ``info`` a propósito: son miles de
     plantillas de tech-detect, y al ser ``confirmed=True`` sin CVSS el suelo de
     ``score_finding`` las subiría todas a MEDIO. Activarlas es una elección
     explícita del usuario en el formulario, no un default.
@@ -1056,7 +1079,7 @@ class NucleiConfig:
         dice dónde está. Tres consumidores dependen de esa respuesta y ninguno
         debe resolverla por su cuenta: ``NucleiScanTask`` (que se la pasa al
         binario por ``-templates``), la ingesta de plantillas al runtime propio y
-        el censo de ingestibilidad (roadmap Fases R y U4).
+        el censo de ingestibilidad (``tools/nuclei_template_census.py``).
 
         Prioridad, de más explícito a más implícito: 1) ``templatesDir`` en
         SecOpsConfig.json, 2) ``NUCLEI_TEMPLATES_DIR`` en el entorno, 3) las
@@ -1155,7 +1178,7 @@ def lybra_engine_config() -> LybraEngineConfig:
 @config_block("features.themis.scanners.lybra.evidence")
 @dataclass(frozen=True)
 class LybraEvidenceConfig:
-    """La captura de evidencia cruda por hallazgo (Fase E, L44).
+    """La captura de evidencia cruda por hallazgo.
 
     Un hallazgo dice qué encontró y con qué regla, pero ``feed_version`` +
     ``check_id`` dan reproducibilidad lógica, no guardan lo que el objetivo
@@ -1189,14 +1212,14 @@ def lybra_ingest_config() -> LybraIngestConfig:
 @config_block("features.themis.scanners.lybra.credentials")
 @dataclass(frozen=True)
 class LybraCredentialsConfig:
-    """El presupuesto del motor de credenciales por defecto (Fase D, L31).
+    """El presupuesto del motor de credenciales por defecto.
 
     Es la única fase del motor que **escribe** en el objetivo — cada intento es
     un login real —, así que el único dial que expone es el que evita que se
     convierta en un ataque de fuerza bruta: cuántas contraseñas se prueban
     contra una misma cuenta antes de rendirse con ella. No hay ``enabled``:
     el motor entero está detrás de la doble puerta de :func:`aggressive
-    mode <>` — objetivo autorizado y petición explícita del usuario (L40) —,
+    mode <>` — objetivo autorizado y petición explícita del usuario —,
     así que un interruptor aparte sería una tercera puerta redundante.
     """
 
@@ -1225,7 +1248,7 @@ def nuclei_config() -> NucleiConfig:
 def get_prompts_config() -> dict:
     return {
         scanner: _cfg(f"features.themis.scanners.{scanner}.prompts", {})
-        for scanner in THEMIS_SCANNERS
+        for scanner in _themis_scanner_values()
     }
 
 
@@ -1348,7 +1371,7 @@ def general_config() -> GeneralConfig:
 @config_block("general.registration")
 @dataclass(frozen=True)
 class RegistrationConfig:
-    """Alta pública de cuentas (§7 de planes-y-organizaciones.md).
+    """Alta pública de cuentas.
 
     Es de las pocas cosas de la capa comercial que sí son configuración de
     instancia y no de negocio: los planes y sus topes viven en base de datos
@@ -1602,6 +1625,15 @@ class TaskQueueConfig:
     )
     history_max_items: int = field(default=200, metadata={"key": "history_max_items"})
 
+    outbox_sweep_interval_seconds: int = field(
+        default=60, metadata={"key": "outbox_sweep_interval_seconds"},
+    )
+    """Cada cuánto ``TaskDispatchScheduler`` reintenta publicar los
+    ``TaskDispatch`` que sigan ``pending`` (B08) -- la red de seguridad para
+    cuando Redis estuvo caído justo en el momento del intento inmediato tras
+    el commit. No confundir con un timeout: un intento fallido no cuenta
+    como agotado, se reintenta indefinidamente en el próximo barrido."""
+
     @property
     def max_workers(self) -> int:
         """Procesos worker a levantar.
@@ -1636,35 +1668,35 @@ class HygeiaLimits:  # pylint: disable=too-many-instance-attributes
     """Topes defensivos sobre lo que un agente puede mandar en un heartbeat.
 
     No son ajustes de comodidad: cada uno acota un recurso que un agente
-    comprometido —o simplemente mal configurado— podría agotar (§16).
+    comprometido —o simplemente mal configurado— podría agotar.
     """
 
     max_body_bytes: int = 1048576
-    """Tamaño máximo (comprimido) del cuerpo de un heartbeat, en bytes (§16.1)."""
+    """Tamaño máximo (comprimido) del cuerpo de un heartbeat, en bytes."""
 
     max_decompressed_bytes: int = 4194304
-    """Tope de descompresión de un heartbeat gzip (defensa anti gzip-bomb, §16.1)."""
+    """Tope de descompresión de un heartbeat gzip (defensa anti gzip-bomb)."""
 
     max_processes: int = 20
-    """Máximo de procesos en topCpu/topMem por heartbeat (§16.1)."""
+    """Máximo de procesos en topCpu/topMem por heartbeat."""
 
     max_disk_mounts: int = 64
-    """Máximo de puntos de montaje reportados por heartbeat (§16.1)."""
+    """Máximo de puntos de montaje reportados por heartbeat."""
 
     max_net_interfaces: int = 64
-    """Máximo de interfaces de red reportadas por heartbeat (§16.1)."""
+    """Máximo de interfaces de red reportadas por heartbeat."""
 
     max_inventory_items: int = 2000
-    """Máximo de aplicaciones en un escaneo de inventario de software (§16.1)."""
+    """Máximo de aplicaciones en un escaneo de inventario de software."""
 
     max_series_points: int = 1000
-    """Máximo de puntos devueltos por la serie temporal de un activo (§5)."""
+    """Máximo de puntos devueltos por la serie temporal de un activo."""
 
     min_interval_sec: int = 5
-    """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
+    """Suelo de cadencia entre heartbeats de una misma clave, en segundos."""
 
     clock_skew_sec: int = 300
-    """Cuánto puede ADELANTARSE el ``collectedAt`` del agente al reloj del servidor (§16.3).
+    """Cuánto puede ADELANTARSE el ``collectedAt`` del agente al reloj del servidor.
 
     Solo acota el futuro. Un heartbeat fechado por delante del servidor no
     tiene explicación legítima —ningún retardo de red produce eso— así que un
@@ -1673,23 +1705,22 @@ class HygeiaLimits:  # pylint: disable=too-many-instance-attributes
     """
 
     max_backfill_sec: int = 86400
-    """Cuánto puede ATRASARSE el ``collectedAt`` respecto al servidor (§16.3).
+    """Cuánto puede ATRASARSE el ``collectedAt`` respecto al servidor.
 
     Un heartbeat viejo sí tiene explicación legítima, y es la razón de ser del
     buffer en disco del agente: si el backend estuvo caído, el agente guarda
-    los heartbeats y los entrega al recuperar la conexión. Con la ventana
-    simétrica de 300 s anterior ese buffer era decorativo — el agente retiene
-    horas de histórico y el servidor rechazaba todo lo de más de cinco
-    minutos, así que una caída larga se perdía entera pese a estar guardada.
+    los heartbeats y los entrega al recuperar la conexión — por eso esta
+    ventana es mucho más generosa que ``clock_skew_sec``, que solo acota el
+    futuro.
 
-    Ampliarlo no reabre el riesgo del §16.3 (una clave robada inyectando
-    snapshots que envenenen el orden de la serie o tapen un hueco de
-    presencia): tanto el histórico como el detector de presencia se ordenan
-    por ``received_at``, el reloj del SERVIDOR, nunca por este campo.
+    Ampliarlo no reabre el riesgo de una clave robada inyectando snapshots que
+    envenenen el orden de la serie o tapen un hueco de presencia: tanto el
+    histórico como el detector de presencia se ordenan por ``received_at``, el
+    reloj del SERVIDOR, nunca por este campo.
     """
 
     max_assets_per_user: int = 500
-    """Cuota de activos monitorizados que puede dar de alta un usuario (§16.4)."""
+    """Cuota de activos monitorizados que puede dar de alta un usuario."""
 
 
 @config_block("features.hygeia")
@@ -1704,7 +1735,7 @@ class HygeiaConfig:
     """Heartbeats perdidos (sobre el intervalo efectivo) para pasar de stale a offline."""
 
     retention_days: int = 30
-    """Antigüedad máxima de un AssetSnapshot antes de podarlo (§7.3)."""
+    """Antigüedad máxima de un AssetSnapshot antes de podarlo."""
 
     retention_cron: str = "0 4 * * *"
     """Expresión cron del job diario de poda de snapshots."""
@@ -1717,7 +1748,7 @@ class HygeiaConfig:
     """
 
     energy_price_per_kwh: float = 0.15
-    """Precio de la electricidad usado para convertir kWh en coste (Fase 3).
+    """Precio de la electricidad usado para convertir kWh en coste.
 
     Clave global y no por activo ni por agente: el precio depende del país,
     el contrato y la hora del día, no de la máquina que se mide, así que
@@ -1779,6 +1810,15 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     """Por debajo de ``legitimate_threshold`` y a partir de aquí, Sospechoso;
     por debajo de aquí, Phishing."""
 
+    sensitivity_profile: str = "balanced"
+    """Perfil de sensibilidad: ``strict``, ``balanced`` o ``lenient``.
+
+    Desplaza los dos umbrales de arriba (``strict`` +5, ``lenient`` -5; ver
+    ``iris/services/scoring.py``). Cada análisis guarda el perfil y los
+    umbrales efectivos en su snapshot de puntuación, así que cambiarlo no
+    reinterpreta en silencio los análisis ya hechos. Un valor desconocido se
+    trata como ``balanced``."""
+
     min_headers: int = 2
     """Cabeceras mínimas para considerar analizable un mensaje."""
 
@@ -1792,6 +1832,21 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     vez acota el coste de ese re-parseo.
     """
 
+    batch_max_items: int = 50
+    """Mensajes como máximo en un lote de ``POST /iris/analyze/batch``,
+    contando los que se rechazan. Un lote que se pasa se rechaza entero."""
+
+    batch_max_total_bytes: int = 50 * 1024 * 1024
+    """Suma máxima de los mensajes analizables de un lote (y tamaño máximo
+    de cada fichero subido, un ZIP incluido). Un lote que se pasa se rechaza
+    entero."""
+
+    max_active_analyses_per_user: int = 100
+    """Análisis pendientes o en curso que puede tener un usuario a la vez
+    cuando envía un lote. Es el freno que impide que un lote llene la cola:
+    si lo superaría, el lote se rechaza entero con un 429 y el usuario
+    vuelve a enviarlo cuando terminen los que tiene en marcha."""
+
     max_connections_per_user: int = 5
     """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
 
@@ -1802,8 +1857,86 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     """Tope diario de análisis auto-ingeridos, **por conexión** (no global).
 
     Una conexión mal configurada (carpeta ruidosa, bucle de reenvíos) no debe
-    poder generar análisis sin límite — ver roadmap-ellysia.md §8.1.
+    poder generar análisis sin límite.
     """
+
+    max_inbox_attempts: int = 5
+    """Reintentos de ingesta antes de marcar una referencia de
+    ``IrisMailboxInbox`` como ``dead`` (B01).
+
+    Sin tope, un mensaje irrecuperablemente roto (parseo, permisos) bloquea
+    para siempre el avance del cursor del proveedor de esa conexión — el
+    checkpoint no confirma el cursor mientras queden referencias pendientes.
+    """
+
+    mailbox_sync_lock_ttl_seconds: int = 900
+    """TTL del lock Redis por conexión que serializa los sync (B02).
+
+    Un lock huérfano (worker muerto a mitad de sync, sin liberar) debe
+    autorrecuperarse por TTL en vez de bloquear la conexión para siempre —
+    ``_drain_pending`` renueva el TTL en cada mensaje procesado, así que este
+    valor solo acota cuánto puede tardar un mensaje suelto sin actividad, no
+    el sync entero.
+    """
+
+    critical_phishing_score_threshold: float = 20
+    """Por debajo de este ``total_score`` (escala 0-100, ver
+    ``suspicious_threshold``), un veredicto Phishing se considera de "alta
+    confianza" (M08): se notifica siempre de inmediato, sin que el
+    silenciado temporal ni el digest diario del usuario puedan retrasarlo o
+    suprimirlo, para que nunca se pierda una incidencia crítica.
+    """
+
+    notification_check_interval_minutes: int = 60
+    """Cada cuánto revisa el scheduler de Iris si hay digests diarios
+    pendientes de enviar o conexiones atascadas/en reautenticación que
+    notificar (M08). Más fino que ``poll_interval_minutes`` porque, a
+    diferencia del sondeo de correo, aquí no hay coste de llamar a un
+    proveedor externo — es una consulta a la propia base de datos.
+    """
+
+    digest_interval_hours: int = 24
+    """Tiempo mínimo entre dos digests consecutivos de un mismo usuario con
+    ``digest_enabled`` (M08). Un usuario que active el digest hoy no debe
+    recibir el primero hasta que pase esta ventana completa."""
+
+    stuck_sync_after_minutes: int = 180
+    """A partir de cuánto tiempo sin un sync limpio (``last_success_at``
+    nulo o más viejo que esto) una conexión activa que sí sigue intentando
+    sincronizar (``last_sync_at`` no nulo) se considera "atascada" y genera
+    un aviso (M08) — ver ``get_connection_health`` (M10) para la misma
+    distinción aplicada a la observabilidad bajo demanda en vez de a un
+    aviso proactivo."""
+
+    raw_message_retention_days: int = 90
+    """Días desde la creación de un análisis tras los que su
+    ``IrisRawMessage`` (cabeceras/``.eml`` completo, cifrado) se purga --
+    el resultado analítico (score, veredicto, resultados por regla) se
+    conserva indefinidamente; solo el contenido crudo del correo caduca
+    (M09/B17/B19). Ver ``services/retention.py``."""
+
+    analysis_retention_days: int = 0
+    """Días tras los que se borra el ``IrisAnalysis`` **entero** (cascada a
+    reglas, raw si quedaba, y PDFs). ``0`` desactiva este límite -- el
+    resultado analítico se conserva para siempre y solo caduca el raw
+    (comportamiento por defecto: "el resultado puede conservarse sin el
+    raw", B19). Un despliegue con requisitos de borrado más estrictos puede
+    fijar un valor positivo."""
+
+    retention_check_interval_hours: int = 24
+    """Cada cuánto corre el job de retención de Iris (M09/B17/B19) --
+    purgar raw vencido y, si aplica, borrar análisis enteros. Diario por
+    defecto: a diferencia del sondeo de buzón, no hay ninguna urgencia en
+    detectar un análisis recién vencido con precisión de minutos."""
+
+    redact_pii_in_reports: bool = True
+    """Si el PDF exportable de un análisis redacta las direcciones de
+    correo, teléfonos y números con forma de tarjeta que aparezcan en el
+    volcado de cabeceras originales (todo lo que no sea el remitente ya
+    analizado, que es la evidencia del informe, no PII que ocultar). Ver
+    ``services/redaction.py``. Es la única vista de Iris que sale del panel
+    autenticado tal cual, así que es la que puede acabar reenviada fuera
+    (M09)."""
 
     prompts: dict = field(default_factory=dict)
     """Prompts de ``IrisAIWriter`` (IA1): ``summary.{system,userTemplate}``."""
@@ -1811,6 +1944,80 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
 
 def iris_config() -> IrisConfig:
     return load_block(IrisConfig)
+
+
+@config_block("features.iris.attachmentInspection")
+@dataclass(frozen=True)
+class IrisAttachmentInspection:
+    """Topes de la inspección estática de adjuntos de Iris (PDF, OOXML, HTML, ZIP).
+
+    Un adjunto es contenido del atacante: cada tope acota un recurso que un
+    adjunto hecho a propósito podría agotar. El tiempo de CPU no tiene tope
+    propio porque las búsquedas son lineales: queda acotado por estos bytes.
+    """
+
+    max_inspected_bytes: int = 10 * 1024 * 1024
+    """Tamaño máximo de un adjunto para abrirlo; uno mayor solo se juzga por
+    su nombre y su tipo."""
+
+    max_expanded_bytes: int = 32 * 1024 * 1024
+    """Bytes que se pueden descomprimir o extraer de un adjunto, sumando todo
+    lo que contiene (entradas de un ZIP y los ZIP dentro de ellas, flujos de un
+    PDF). Un ZIP que declara más cuenta como bomba."""
+
+    max_archive_entries: int = 1000
+    """Entradas de un ZIP (o de un documento Office) que se revisan."""
+
+    max_archive_depth: int = 2
+    """Niveles de ZIP dentro de ZIP que se abren; uno más profundo es un hallazgo."""
+
+    max_compression_ratio: int = 200
+    """Razón entre tamaño descomprimido y comprimido de una entrada de ZIP (de
+    1 MiB o más) a partir de la cual cuenta como bomba."""
+
+    max_pdf_streams: int = 1000
+    """Flujos comprimidos de un PDF que se descomprimen para buscar en ellos."""
+
+
+def iris_attachment_inspection() -> IrisAttachmentInspection:
+    return load_block(IrisAttachmentInspection)
+
+
+@config_block("features.iris.ocr")
+@dataclass(frozen=True)
+class IrisOcrConfig:
+    """OCR local de las imágenes de un correo (regla «Image Text Phishing»).
+
+    El motor es Tesseract, en la propia máquina: ninguna imagen sale a un
+    servicio de terceros. Si el binario no está instalado, la regla se queda
+    neutral.
+    """
+
+    enabled: bool = True
+    """Si se leen las imágenes."""
+
+    languages: str = "spa+eng"
+    """Idiomas de Tesseract separados por ``+``; cada uno necesita su paquete
+    de datos instalado (``tesseract-ocr-spa``…)."""
+
+    max_images: int = 5
+    """Imágenes que se leen como mucho por mensaje: el OCR es lo más caro del
+    análisis."""
+
+    min_image_bytes: int = 2048
+    """Imágenes más pequeñas no se leen: píxeles de seguimiento, iconos y
+    separadores no llevan texto."""
+
+    max_pixels: int = 16_000_000
+    """Píxeles máximos (ancho × alto) de una imagen para leerla; una captura
+    de pantalla grande ronda los 8 millones."""
+
+    timeout_seconds: int = 10
+    """Tiempo máximo del motor por imagen; si se pasa, se mata el proceso."""
+
+
+def iris_ocr_config() -> IrisOcrConfig:
+    return load_block(IrisOcrConfig)
 
 
 # --- Datasets y pesos: buscados por clave, no por campo ---------------------
@@ -1833,21 +2040,70 @@ def get_iris_data(key: str):
     return _cfg(f"features.iris.data.{key}")
 
 
+#: Pesos de scoring de Iris que sustituyen a ``features.iris.scoring`` mientras
+#: dura un ``scoring_weight_overrides``. ``None`` fuera de ese bloque.
+_iris_scoring_weight_overrides: ContextVar[Optional[dict]] = ContextVar(
+    "iris_scoring_weight_overrides", default=None,
+)
+
+
+@contextmanager
+def scoring_weight_overrides(overrides: Optional[dict]):
+    """Evalúa con otro mapa de pesos de Iris sin tocar la configuración.
+
+    Es lo que usa el replay para comparar una política candidata con la
+    vigente: dentro del bloque, ``get_iris_scoring_weight`` lee de
+    ``overrides`` en vez de ``features.iris.scoring``. Al ser un
+    ``ContextVar``, no afecta a otros hilos ni a otras peticiones.
+
+    Args:
+        overrides: Mapa ``<regla>.<señal>`` → peso que **sustituye** entero al
+            configurado (una clave ausente usa el default del código). ``None``
+            deja la configuración tal cual.
+
+    Yields:
+        None
+    """
+    token = _iris_scoring_weight_overrides.set(dict(overrides) if overrides is not None else None)
+    try:
+        yield
+    finally:
+        _iris_scoring_weight_overrides.reset(token)
+
+
 @_lazy_load
 def get_iris_scoring_weight(weight_key: str, default: float) -> float:
-    """Peso de scoring configurable de una regla de Iris (recalibración §19/S6).
+    """Peso de scoring configurable de una regla de Iris, para recalibrarla.
 
     ``features.iris.scoring.<weight_key>`` puede pisar la magnitud de
     penalización que una regla define en código sin necesidad de redeploy. El
     propio ``default`` que cada llamada pasa (el valor calibrado por el consejo,
     ver STUDY.md) es el que se usa si la clave no está en la config, así que el
     comportamiento no cambia hasta que alguien la añade explícitamente.
+
+    Dentro de un ``scoring_weight_overrides`` se lee de ese mapa en su lugar.
     """
+    overrides = _iris_scoring_weight_overrides.get()
+    if overrides is not None:
+        return float(overrides.get(weight_key, default))
     return _cfg(f"features.iris.scoring.{weight_key}", default, float)
 
 
+@_lazy_load
+def get_iris_scoring_overrides() -> dict:
+    """Pesos de Iris que la configuración sobreescribe (``features.iris.scoring``).
+
+    Es la parte de los pesos que cambia sin desplegar, y por eso entra en el
+    snapshot de puntuación de cada análisis.
+
+    Returns:
+        dict: Copia plana ``<regla>.<señal>`` → peso; vacía si no hay ninguno.
+    """
+    return {key: float(value) for key, value in (_cfg("features.iris.scoring", {}) or {}).items()}
+
+
 # =============================================================================
-# CONECTOR DE BUZÓN DE IRIS (Fase 3-4 del plan mailbox-connector)
+# CONECTOR DE BUZÓN DE IRIS
 # =============================================================================
 # Los ajustes del conector (cuotas, cadencia de sondeo) viven en ``IrisConfig``;
 # aquí solo quedan las credenciales OAuth de las apps, que son secretos de .env.

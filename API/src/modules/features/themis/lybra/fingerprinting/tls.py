@@ -3,7 +3,7 @@
 Reads the negotiated protocol version and the self-signed/expiry status of the
 certificate.
 
-**JARM: archivado, no pendiente** (L24, 2026-09-02). Este módulo hace **un**
+**JARM: archivado, no pendiente** (2026-09-02). Este módulo hace **un**
 handshake, y de ahí salen la versión de protocolo, el autofirmado y la
 caducidad. JARM haría diez saludos deliberadamente distintos y hashearía el
 conjunto para identificar la *pila* TLS, no el producto.
@@ -15,14 +15,16 @@ puede buscar en ningún catálogo. Y comprobar esa coincidencia exige un
 laboratorio con varias pilas TLS distintas (OpenSSL, BoringSSL, Schannel,
 JSSE), que no existe aquí.
 
-A eso se suma que no es requisito de ninguna definición de hecho —la Fase F se
-cierra con la concordancia frente a Nmap, no con JARM—, que su prioridad medida
-es la más baja del backlog, y que diez saludos por servicio TLS es la sonda más
-cara del catálogo a cambio de un dato que nadie consultaría.
+A eso se suma que nada del fingerprinting depende de él —su medida de éxito es
+la concordancia frente a Nmap, no JARM—, que es de lo menos prioritario que hay
+pendiente, y que diez saludos por servicio TLS es la sonda más cara del
+catálogo a cambio de un dato que nadie consultaría.
 
-La decisión está escrita, con qué haría falta para reabrirla, en la sección
-Fase F de ``plans/feature/themis/lybra-engine-roadmap.md``. No es un "todavía
-no": es un "no, y por esto".
+Qué haría falta para reabrirlo: un laboratorio con al menos cuatro pilas TLS
+distintas contra el que comprobar que el hash coincide con el de la
+implementación de referencia, y alguien que de verdad vaya a consumir el hash
+—un catálogo de JARMs conocidos, o la necesidad de reconocer infraestructura
+que no dice nada de sí misma—. No es un "todavía no": es un "no, y por esto".
 """
 
 from __future__ import annotations

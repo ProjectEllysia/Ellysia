@@ -1,6 +1,5 @@
 """
-AegisManager — generación de píldoras de concienciación (D3 en
-plans/deuda-tecnica-y-calidad.md).
+AegisManager — generación de píldoras de concienciación.
 
 Crea documentos pendientes y lanza el workflow de generación en la
 TaskQueue, persiste el contenido (tips en AegisTip, avisos en
@@ -22,6 +21,9 @@ import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskTrackingMixin, job_context
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox import build_dispatch
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
@@ -73,7 +75,7 @@ class AegisManager(TaskTrackingMixin):
         Lanza la generacion asincrona de una pildora y devuelve el documentId
         inmediatamente.
 
-        E6: no necesita lock. ``_create_pending_document`` siempre inserta
+        E6: no necesita lock. ``_create_pending_document_and_dispatch`` siempre inserta
         una fila nueva (PK autoincremental) — no hay estado mutuo
         compartido que proteger entre dos llamadas concurrentes, cada una
         obtiene su propio documento. Un ``threading.Lock`` de atributo de
@@ -93,16 +95,13 @@ class AegisManager(TaskTrackingMixin):
         quota_manager.consume(self.user.id, LimitKey.AEGIS_PILLS)
         quota_manager.consume(self.user.id, LimitKey.AI_REQUESTS)
 
-        tweaks      = tweaks or {}
-        document_id = self._create_pending_document(topic_id)
+        tweaks = tweaks or {}
+        document_id, dispatch_id = self._create_pending_document_and_dispatch(topic_id, tweaks)
 
-        self._task_queue.submit(
-            func=AegisManager.execute_aegis_generation,
-            args=(document_id, topic_id, tweaks, self.user.id),
-            name=f"AegisGen-{document_id}",
-            category=self.TASK_CATEGORY,
-            external_id=self.external_id_for(document_id),
-        )
+        # Camino feliz: publicar ya, para no añadir latencia cuando Redis está
+        # arriba. Si falla, la fila de outbox queda `pending` y la recogen el
+        # barrido periódico o la reconciliación de arranque.
+        OutboxDispatcher.dispatch(dispatch_id, task_queue=self._task_queue)
 
         return document_id
 
@@ -658,8 +657,34 @@ class AegisManager(TaskTrackingMixin):
 
         return "\n\n---\n\n".join(contents)
 
-    def _create_pending_document(self, topic_id: int) -> int:
-        """Crea un registro AegisDocument en estado 'pending' y devuelve su ID."""
+    def _create_pending_document_and_dispatch(self, topic_id: int, tweaks: dict) -> tuple[int, int]:
+        """Crea el ``AegisDocument`` 'pending' y su intención de encolado, juntos.
+
+        Las dos filas viajan en la misma transacción. Antes el documento
+        se confirmaba aquí y el ``submit()`` caía fuera, sin ningún try/except:
+        si Redis fallaba justo ahí, la píldora se quedaba en ``pending`` para
+        siempre —un "Generando..." que nunca termina— con las dos cuotas ya
+        cobradas (``AEGIS_PILLS`` y ``AI_REQUESTS``) y sin nada que lo
+        reintentase. Aegis no tiene reconciliación de arranque que lo cubra.
+
+        Repetir la generación es seguro, que es lo que la outbox exige de sus
+        consumidores: ``execute_aegis_generation`` escribe sobre el documento
+        que recibe por id (``_update_document_status``), no crea uno nuevo, así
+        que un segundo intento regenera el contenido en su sitio en vez de
+        dejar una píldora duplicada.
+
+        Args:
+            topic_id: Primary key del ``Topic`` sobre el que generar la píldora.
+            tweaks: Ajustes de generación que el usuario pidió (tono, longitud,
+                enfoque...). Debe ser JSON-serializable: viaja en los argumentos
+                del job, que la outbox guarda en JSONB. Un diccionario vacío
+                significa "sin ajustes".
+
+        Returns:
+            tuple[int, int]: El id del documento recién creado y el id de su
+                fila ``TaskDispatch``, que el llamante pasa a
+                ``OutboxDispatcher.dispatch()``.
+        """
         timestamp = utcnow_naive().strftime("%Y%m%d_%H%M%S")
         placeholder = f"pending_{timestamp}_{self.user.id}_{topic_id}"
 
@@ -676,10 +701,19 @@ class AegisManager(TaskTrackingMixin):
         with UnitOfWork() as uow:
             repo = AegisDocumentRepository(uow)
             saved_doc = repo.save(document)
+            document_id = saved_doc.id
+            dispatch = TaskDispatchRepository(uow).save(build_dispatch(
+                func=AegisManager.execute_aegis_generation,
+                name=f"AegisGen-{document_id}",
+                category=self.TASK_CATEGORY,
+                args=(document_id, topic_id, tweaks, self.user.id),
+                external_id=self.external_id_for(document_id),
+            ))
+            dispatch_id = dispatch.id
             # Durable antes de encolar: el worker corre en otro proceso.
             uow.commit_for_handoff()
 
-        return saved_doc.id # type: ignore
+        return document_id, dispatch_id  # type: ignore
 
     def _update_document_status(
         self,

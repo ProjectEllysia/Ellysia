@@ -1,4 +1,4 @@
-"""ProgramedScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""Gestión de escaneos programados: alta, edición y despacho periódico de sus definiciones."""
 
 import logging
 from datetime import datetime

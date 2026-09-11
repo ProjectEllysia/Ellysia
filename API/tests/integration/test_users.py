@@ -144,11 +144,10 @@ def test_admin_can_actually_revoke_an_attribute(client, admin_user, regular_user
 def test_role_user_cannot_grant_attributes_to_itself(client, regular_user, auth_headers):
     """Un usuario normal no puede autoconcederse permisos.
 
-    Hoy lo tapa `require_role(Role.ADMIN)` en el endpoint. Cuando la fase 5 lo
-    retire para que el dueño de una organización pueda gestionar a los suyos, la
-    única barrera será `can_manage_user` — que empieza con
-    `if actor_id == target_id: return True` y convertiría esta llamada en una
-    escalada de privilegios. Este test es el que lo impedirá.
+    El endpoint delega en `can_administer_user`, que a propósito NO hereda el
+    `actor_id == target_id → True` de `can_manage_user` (válido para leer los
+    propios atributos, pero una escalada de privilegios si valiera también
+    para escribirlos): aquí nadie se gestiona a sí mismo salvo root.
     """
     resp = client.put(f"/users/{regular_user.id}/attributes",
                       headers=auth_headers(regular_user),

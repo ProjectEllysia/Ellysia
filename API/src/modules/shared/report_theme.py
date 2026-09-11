@@ -1,8 +1,8 @@
 """
 Tema visual de los informes PDF: paleta y estilos.
 
-Nació en Themis (D5 en ``plans/deuda-tecnica-y-calidad.md``, extraído del
-``reports.py`` de 85 KB, el fichero más grande del repositorio) y vive aquí
+Nació en Themis (extraído del antiguo ``reports.py`` de 85 KB, el fichero más
+grande del repositorio) y vive aquí
 desde que Hygeia también imprime. No sabe nada de escaneos ni de activos: solo
 importa ``reportlab``, así que cualquier módulo que genere un PDF puede
 heredarlo y salir con la misma cara que el resto del producto.

@@ -1,8 +1,10 @@
-"""NmapScanManager — extraido de thirdparty_scans_managers.py (D2 en
-plans/deuda-tecnica-y-calidad.md: el fichero unificaba Nmap/Nikto/Nuclei
-"porque cada uno era pequeño y compartía la misma forma"; con A4 (base
-_create_scan_record) y A6 (base _previous_findings_map) ya no comparten
-apenas cuerpo, así que la unificación dejó de pagarse sola)."""
+"""NmapScanManager — extraído del antiguo thirdparty_scans_managers.py.
+
+Aquel fichero unificaba Nmap/Nikto/Nuclei "porque cada uno era pequeño y
+compartía la misma forma"; desde que la creación del registro
+(``_create_scan_record``) y el mapa de hallazgos previos
+(``_previous_findings_map``) viven en la clase base, ya no comparten apenas
+cuerpo, así que la unificación dejó de pagarse sola."""
 
 import logging
 from typing import Optional
@@ -73,21 +75,16 @@ class NmapScanManager(ScanManager):
             # programado entra por este mismo método.
             QuotaManager().consume(user_id, LimitKey.THEMIS_THIRDPARTY_SCANS)
 
-            scan    = self._create_scan_record(
+            scan = self._create_scan_and_dispatch(
                 target=target_host,
                 user_id=user_id,
                 programed_scan_id=programed_scan_id,
+                func=NmapScanManager.execute_nmap_scan,
+                job_name="NmapScan",
+                trailing_args=(target_host, target_ports, timeout),
+                timeout=timeout,
             )
             scan_id = scan.id
-
-            self._task_queue.submit(
-                func=NmapScanManager.execute_nmap_scan,
-                args=(scan_id, target_host, target_ports, timeout),
-                name=f"NmapScan-{scan_id}",
-                category=self.TASK_CATEGORY,
-                external_id=self.external_id_for(scan_id),
-                timeout=timeout + self._scan_timeout_margin,
-            )
 
             logger.info(f"Escaneo Nmap {scan_id} iniciado")
             return scan_id

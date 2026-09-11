@@ -1,11 +1,11 @@
-"""C1/B04: reconciliación de análisis Iris huérfanos tras un apagado abrupto.
+"""Reconciliación de análisis Iris huérfanos tras un apagado abrupto.
 
 Espejo de la reconciliación que ya existía para Themis (ScanManager.
 reconcile_orphaned_scans) — sin esto, un análisis que queda en pending/running
 cuando el proceso muere se queda así para siempre, porque no hay ninguna tarea
 viva en TaskQueue que lo actualice tras reiniciar.
 
-`B04` cambió el criterio. Antes se conservaba el análisis solo si su tarea
+El criterio cambió. Antes se conservaba el análisis solo si su tarea
 estaba exactamente en ``pending``, y eso se comía trabajo vivo: los workers son
 procesos aparte, reiniciar la API no los para, y un job ``running`` puede estar
 avanzando ahora mismo en otro proceso. La pregunta correcta no es "¿en qué
@@ -120,7 +120,7 @@ def test_reconcile_leaves_still_queued_analysis_alone(app, regular_user):
 
 
 def test_reconcile_leaves_a_running_analysis_alone(app, regular_user):
-    """El caso que motiva B04.
+    """El caso que motivó cambiar el criterio.
 
     El worker está analizando ahora mismo en otro proceso. Con el criterio
     viejo —conservar solo si el estado es exactamente ``pending``— este

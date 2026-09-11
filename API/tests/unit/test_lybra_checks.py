@@ -1,9 +1,8 @@
-"""Unit tests for the Lybra active-check runtime (Fase R).
+"""Unit tests for the Lybra active-check runtime.
 
 Pure: an injected ``fetch``/``network_open`` returns crafted responses, so no
 real network. Exercises the bundled feed, the matchers, HTTP-service
-selection, the safe/aggressive gate, and the ``type: "network"`` family Fase N
-adds.
+selection, the safe/aggressive gate, and the ``type: "network"`` family.
 
 Para la familia ``network``, el transporte se sustituye **a nivel de socket**
 (bytes) y no a nivel de sesión: la nota al principio de esa sección explica
@@ -134,7 +133,7 @@ def test_safe_mode_skips_aggressive_checks(tmp_path):
     assert len(aggressive) == 1
 
 
-# --------------------------------------------------- network checks (Fase N)
+# --------------------------------------------------- network checks
 #
 # **Dónde se sustituye el transporte, y por qué ahí.** Los tests de
 # comportamiento de protocolo de esta sección inyectan un *socket* falso y
@@ -629,7 +628,7 @@ def test_a_tls_service_on_an_arbitrary_port_still_misses_the_hygiene_checks():
     El esquema ya se observa, así que un TLS en 7777 se sondea bien y recibe
     los checks de cabeceras. Lo que no recibe son los de higiene de
     certificado: su candidatura sigue decidiéndose por número de puerto.
-    Hacerla observada del todo es #283.
+    Hacerla observada del todo está pendiente.
     """
     from src.modules.features.themis.lybra import is_tls_service
 
@@ -946,7 +945,7 @@ def test_a_check_that_skipped_the_loader_with_an_unknown_service_is_logged(caplo
     assert "protocolo-de-otro-mundo" in caplog.text
 
 
-# --------------------------------------------------- ``type: "script"`` (Fase R)
+# --------------------------------------------------- ``type: "script"``
 
 class _FakeSmbProbe:
     """Stands in for SmbProbe: returns a canned (dialect, security_mode) pair.
@@ -1078,7 +1077,7 @@ def test_script_check_declares_its_plugin_in_the_bundled_feed():
     assert check.script in default_script_plugins()
 
 
-# ------------------------------------------ snmp-default-community (Ronda 1)
+# ------------------------------------------ snmp-default-community
 
 class _FakeSnmpProbe:
     """Stands in for SnmpProbe: returns a canned sysDescr string, or ``None``
@@ -1136,10 +1135,10 @@ def test_snmp_check_in_bundled_feed():
     assert check.script in default_script_plugins()
 
 
-# ------------------------------------------- feed en YAML y compatibilidad (Fase R)
+# ------------------------------------------- feed en YAML y compatibilidad
 
 def test_bundled_feed_is_yaml():
-    """El feed propio vive en YAML desde la Fase R; el JSON se retiró."""
+    """El feed propio vive en YAML; el JSON no está soportado."""
     from src.modules.features.themis.lybra.checks import _BUNDLED_FEED
     assert _BUNDLED_FEED.suffix == ".yaml"
     assert _BUNDLED_FEED.exists()

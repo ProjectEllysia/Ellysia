@@ -77,7 +77,7 @@ def alembic_config(migrations_url):
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Bug preexistente destapado por esta matriz (#356): la revisión "
+        "Bug preexistente destapado por esta matriz: la revisión "
         "b2c3d4e5f6a7 inserta en PlanLimit diez migraciones antes de que "
         "f2b3c4d5e6f7 cree la tabla, así que `alembic upgrade head` sobre una "
         "base vacía falla. No se nota en producción porque el primer "
@@ -105,12 +105,12 @@ def test_the_whole_chain_applies_to_an_empty_database(alembic_config, migrations
     strict=True,
     reason=(
         "Depende de que `upgrade head` funcione sobre una base vacía, que hoy "
-        "no lo hace (#356). Se quita junto con el marcador del test anterior."
+        "no lo hace. Se quita junto con el marcador del test anterior."
     ),
 )
 def test_the_phase_0_columns_survive_a_downgrade_and_a_new_upgrade(alembic_config,
                                                                    migrations_url):
-    """Las cuatro migraciones de la fase 0, en los dos sentidos.
+    """Las cuatro migraciones de Iris cubiertas por este test, en los dos sentidos.
 
     Bajar y volver a subir es lo que hace falta cuando un despliegue se
     revierte, y es donde se ve si una bajada olvidó una columna: la subida
@@ -134,7 +134,7 @@ def test_the_phase_0_columns_survive_a_downgrade_and_a_new_upgrade(alembic_confi
     finally:
         engine.dispose()
 
-    # Cuatro pasos atrás: las cuatro migraciones de la fase 0.
+    # Cuatro pasos atrás: las cuatro migraciones cubiertas por este test.
     command.downgrade(alembic_config, "-4")
     command.upgrade(alembic_config, "head")
 

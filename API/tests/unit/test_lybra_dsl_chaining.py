@@ -1,4 +1,4 @@
-"""El DSL de checks: variables extraídas, encadenamiento y payloads (L30).
+"""El DSL de checks: variables extraídas, encadenamiento y payloads.
 
 El motor sabía hacer una petición y mirar la respuesta, y nada más. No podía
 leer un dato de una respuesta y usarlo en la siguiente (login → recurso
@@ -216,7 +216,7 @@ def test_the_first_matching_payload_wins_as_a_single_finding():
     assert len(tried) == 1                                # paró en el primero
 
 
-# =============================================== validación de forma (CI, #275)
+# ===================================================== validación de forma (CI)
 
 
 def test_the_shipped_feed_including_the_payload_check_is_well_formed():

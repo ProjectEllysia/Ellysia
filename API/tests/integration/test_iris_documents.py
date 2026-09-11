@@ -173,7 +173,29 @@ def test_list_all_documents_for_user(client, app, root_user, root_headers, fake_
 
     resp = client.get("/iris/documents", headers=root_headers)
     assert resp.status_code == 200
-    assert resp.get_json()["total"] == 1
+    body = resp.get_json()
+    assert body["total"] == 1
+    assert body["page"] == 1
+    assert body["perPage"] == 10
+
+
+def test_documents_are_paginated(client, app, root_user, root_headers, fake_queue):
+    """Antes devolvía todos los documentos del usuario sin límite."""
+    for _ in range(3):
+        analysis_id = _seed_analysis(app, root_user.id)
+        client.post(f"/iris/results/{analysis_id}/document", headers=root_headers)
+
+    first_page = client.get("/iris/documents?page=1&per_page=2", headers=root_headers).get_json()
+    assert len(first_page["documents"]) == 2
+    assert first_page["total"] == 3
+
+    second_page = client.get("/iris/documents?page=2&per_page=2", headers=root_headers).get_json()
+    assert len(second_page["documents"]) == 1
+    assert second_page["total"] == 3
+
+    third_page = client.get("/iris/documents?page=3&per_page=2", headers=root_headers).get_json()
+    assert third_page["documents"] == []
+    assert third_page["total"] == 3
 
 
 def test_document_not_owned_by_other_user_is_hidden(client, app, root_user, regular_user, auth_headers, root_headers, fake_queue):
@@ -198,11 +220,11 @@ def test_delete_document(client, app, root_user, root_headers, fake_queue):
     assert after.status_code == 404
 
 
-# --------------------------------------------------------------- B11: PDFs independientes
+# --------------------------------------------------------------- PDFs independientes
 
 def test_two_documents_of_the_same_analysis_are_independent(client, app, root_user,
                                                             root_headers, fake_queue):
-    """B11 de punta a punta.
+    """Dos documentos del mismo análisis no se pisan, de punta a punta.
 
     El modelo permite N ``IrisDocument`` por análisis (relación ``documents``
     con ``cascade="all, delete-orphan"``), pero el PDF se llamaba

@@ -1,4 +1,4 @@
-"""Unit tests for how the PDF report reacts when the AI writer fails (#118).
+"""Unit tests for how the PDF report reacts when the AI writer fails.
 
 ``PrintingStrategy._append_ai_analysis`` used to catch every exception the
 same way, rendering a generic "No se pudo generar análisis IA" paragraph

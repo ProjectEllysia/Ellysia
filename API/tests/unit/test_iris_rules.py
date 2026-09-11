@@ -126,12 +126,12 @@ def test_dmarc_missing_is_neutral():
     assert result.score == 0
 
 
-# -------------------------------------------------------------------- ARC (D7)
+# -------------------------------------------------------------------- ARC
 
 class _ArcContext:
     """Contexto mínimo para ``check_arc_chain``.
 
-    B06 pasó la regla a ``needs_context=True``: ya no le basta con las
+    La frontera de confianza pasó la regla a ``needs_context=True``: ya no le basta con las
     cabeceras, necesita la cadena Received para saber si quien dice haber
     validado la cadena ARC está por encima de la frontera de confianza.
     """
@@ -155,7 +155,7 @@ def test_arc_cv_pass_is_positive():
 
 
 def test_arc_cv_pass_alone_is_not_verified():
-    """B06: `cv=pass` es lo que el mensaje dice de sí mismo.
+    """`cv=pass` es lo que el mensaje dice de sí mismo.
 
     Iris no verifica firmas criptográficas, así que esa declaración no puede
     valer como prueba — cualquiera puede escribirla. La regla sigue
@@ -301,9 +301,11 @@ def test_lookalike_cousin_domain_is_flagged():
 
 
 def test_lookalike_punycode_domain_is_flagged():
+    """``xn--pypal-4ve`` es «pаypal» con una ``а`` cirílica: homógrafo de marca."""
     result = check_lookalike_domain({"from": "a@xn--pypal-4ve.com"})
     assert result.verdict == "fail"
-    assert result.details["type"] == "punycode"
+    assert result.details["type"] == "idn_homograph"
+    assert result.details["brand"] == "paypal"
 
 
 def test_lookalike_legitimate_brand_domain_passes():
@@ -435,7 +437,7 @@ def test_missing_list_unsubscribe_is_neutral():
     assert result.score == 0
 
 
-# ------------------------------------------------- RFC 2047 encoded-subject bypass (B5)
+# ------------------------------------------------- RFC 2047 encoded-subject bypass
 
 def test_encoded_subject_does_not_bypass_keyword_scan():
     # "Account Suspended - Verify Now" Base64-encoded as an RFC 2047 word.
@@ -446,7 +448,7 @@ def test_encoded_subject_does_not_bypass_keyword_scan():
     assert result.verdict.startswith("alarming_")
 
 
-# ----------------------------------------------------------------- Verdict gating (B3)
+# ----------------------------------------------------------------- Verdict gating
 
 def _rr(verdict, **details):
     return RuleResult(score=0, verdict=verdict, details=details)
@@ -480,12 +482,12 @@ def test_gating_caps_at_suspicious_on_domain_misalignment():
 
 
 def test_gating_verified_arc_pass_softens_spf_dmarc_alignment_gates():
-    # D7: a legitimate forward validated by ARC (cv=pass) must not trip
+    # A legitimate forward validated by ARC (cv=pass) must not trip
     # the SPF/DMARC/alignment gates that exist to catch spoofing --
     # mailing lists/forwarders routinely break raw SPF/alignment as a
     # side effect of legitimate relaying.
     #
-    # B06 añade la condición que faltaba: la validación tiene que venir
+    # La frontera de confianza añade la condición que faltaba: la validación tiene que venir
     # confirmada por un verificador de confianza (`verified`), no del propio
     # sello del mensaje.
     named = {
@@ -498,7 +500,7 @@ def test_gating_verified_arc_pass_softens_spf_dmarc_alignment_gates():
 
 
 def test_gating_unverified_arc_pass_no_longer_softens_the_gates():
-    """B06, el bypass que se cierra.
+    """El bypass que cierra la frontera de confianza.
 
     Antes bastaba con escribir `ARC-Seal: cv=pass` en el propio correo para
     desactivar de golpe los tres gates que cazan suplantación. Ahora un ARC sin
@@ -586,7 +588,7 @@ def test_gating_forces_phishing_on_link_brand_impersonation():
 
 
 def test_gating_forces_phishing_on_suspicious_qr_code():
-    # D1: a QR code decoding to a suspicious URL is a strong evasion
+    # A QR code decoding to a suspicious URL is a strong evasion
     # signal on its own -- it never appears as text/link anywhere.
     named = {
         "QR Code Links": _rr("fail"),
@@ -596,7 +598,7 @@ def test_gating_forces_phishing_on_suspicious_qr_code():
 
 
 def test_gating_returns_human_readable_reasons():
-    # S1: the reasons that fired must be surfaced (not just logged) so the
+    # The reasons that fired must be surfaced (not just logged) so the
     # report can explain WHY the verdict was gated.
     named = {"Lookalike Sender Domain": _rr("fail")}
     verdict, reasons = IrisManager._apply_verdict_gates("Legitimate", named)
@@ -611,7 +613,7 @@ def test_gating_returns_empty_reasons_when_clean():
     assert reasons == []
 
 
-# --------------------------------------------------------------- Top signals (S2)
+# --------------------------------------------------------------- Top signals
 
 def _rd(rule_name, score, category="header_analysis"):
     return {"ruleName": rule_name, "category": category, "score": score,
@@ -649,7 +651,7 @@ def test_top_signals_caps_at_limit_and_keeps_original_index():
 
 def _unfamilied_defs(count: int) -> list[dict]:
     # No `family` key -> passes through _aggregate_score's family-cap logic
-    # untouched, matching these tests' original (pre-§18) intent.
+    # untouched, matching these tests' original intent, from before family caps existed.
     return [{"name": f"Rule{i}", "family": ""} for i in range(count)]
 
 
@@ -679,7 +681,7 @@ def test_aggregate_score_floored_at_zero():
 
 def _iocs_for(monkeypatch, raw_message):
     from types import SimpleNamespace
-    fake_analysis = SimpleNamespace(id=42, raw_headers=raw_message)
+    fake_analysis = SimpleNamespace(id=42, raw_headers=raw_message, winning_context=None)
     monkeypatch.setattr(
         IrisManager, "assert_analysis_ownership",
         classmethod(lambda cls, analysis_id, user_id: fake_analysis),
@@ -735,7 +737,7 @@ def test_iocs_empty_lists_when_headers_only_and_clean(monkeypatch):
 
 
 def test_iocs_includes_attachment_sha256(monkeypatch):
-    # D8: every attachment's hash is surfaced as an IOC, not just ones a
+    # Every attachment's hash is surfaced as an IOC, not just ones a
     # rule flagged as suspicious.
     import base64
     import hashlib
@@ -765,6 +767,10 @@ class _FakeTaskQueue:
 
 
 def test_reanalyze_submits_the_same_stored_raw_input(monkeypatch):
+    """reanalyze() delega en analyze() con el raw_headers guardado -- sus
+    propios internos (cuota, outbox, TaskQueue) ya tienen cobertura directa
+    en test_iris_quota_idempotency.py y test_iris.py, así que aquí basta con
+    comprobar qué le pasa reanalyze() a analyze()."""
     from types import SimpleNamespace
 
     raw = "From: a@b.com\r\nSubject: Hi\r\n\r\n"
@@ -773,15 +779,21 @@ def test_reanalyze_submits_the_same_stored_raw_input(monkeypatch):
         IrisManager, "assert_analysis_ownership",
         classmethod(lambda cls, analysis_id, user_id: fake_analysis),
     )
-    monkeypatch.setattr(IrisManager, "_create_analysis_record",
-                        lambda self, r, uid, title=None, connection_id=None, source_message_uid=None: 99)
-    monkeypatch.setattr(IrisManager, "_validate_headers_pre", staticmethod(lambda r: None))
 
-    fake_queue = _FakeTaskQueue()
-    new_id = IrisManager(task_queue=fake_queue).reanalyze(analysis_id=5, user_id=1)
+    captured = {}
+
+    def _fake_analyze(self, raw_headers, user_id, title=None, **kwargs):
+        captured["raw_headers"] = raw_headers
+        captured["user_id"] = user_id
+        return 99
+
+    monkeypatch.setattr(IrisManager, "analyze", _fake_analyze)
+
+    new_id = IrisManager().reanalyze(analysis_id=5, user_id=1)
 
     assert new_id == 99
-    assert fake_queue.submitted["args"] == (99, raw)
+    assert captured["raw_headers"] == raw
+    assert captured["user_id"] == 1
 
 
 def test_reanalyze_title_references_the_original():
@@ -790,18 +802,14 @@ def test_reanalyze_title_references_the_original():
     captured_titles = []
 
     class _Manager(IrisManager):
-        def _create_analysis_record(self, raw, uid, title=None, connection_id=None, source_message_uid=None):
+        def analyze(self, raw_headers, user_id, title=None, **kwargs):
             captured_titles.append(title)
             return 100
-
-        @staticmethod
-        def _validate_headers_pre(raw):
-            return None
 
     fake_analysis = SimpleNamespace(id=7, title="Factura pendiente", raw_headers="From: a@b.com\r\n\r\n")
     _Manager.assert_analysis_ownership = classmethod(lambda cls, analysis_id, user_id: fake_analysis)
 
-    _Manager(task_queue=_FakeTaskQueue()).reanalyze(analysis_id=7, user_id=1)
+    _Manager().reanalyze(analysis_id=7, user_id=1)
 
     assert captured_titles == ["Factura pendiente (reanálisis)"]
 
@@ -821,7 +829,7 @@ def test_generate_ai_summary_rejects_unfinished_analysis(monkeypatch):
 
 
 def test_generate_ai_summary_submits_task_for_finished_analysis(monkeypatch):
-    """B10 añadió dos pasos con estado a esta función —reclamar la fila y
+    """El cobro idempotente añadió dos pasos con estado a esta función —reclamar la fila y
     cobrar cuota— que un test sin base de datos no puede ejercitar.
 
     Aquí se sustituyen los dos por dobles para que el test siga siendo lo que
@@ -847,6 +855,7 @@ def test_generate_ai_summary_submits_task_for_finished_analysis(monkeypatch):
 
     class _FreeQuota:
         def consume(self, user_id, key, amount=1): pass
+        def consume_many(self, user_id, keys, amount=1): pass
         def refund(self, user_id, key, amount=1): pass
 
     monkeypatch.setattr(analysis_mod, "QuotaManager", _FreeQuota)

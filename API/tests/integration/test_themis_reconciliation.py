@@ -14,7 +14,7 @@ Lo que veía el usuario era una contradicción: el escaneo aparecía como fallid
 y, minutos más tarde, el worker terminaba y escribía ``finished`` encima de esa
 misma fila.
 
-Es el mismo defecto que Iris arregló en #208, y no por casualidad: esta
+Es el mismo defecto que Iris ya arregló en la suya, y no por casualidad: esta
 reconciliación fue el original del que aquélla se copió. Estos tests son el
 espejo de ``test_iris_reconciliation.py``, con la diferencia de que aquí el
 método es un ``classmethod`` sobre una clase abstracta que barre los escaneos de

@@ -39,6 +39,27 @@ class IrisAnalysisNotReadyError(IrisError):
         super().__init__(f"Analysis {analysis_id} is not ready (status: {status})")
 
 
+class IrisRawMessagePurgedError(IrisError):
+    """El raw de este análisis ya no existe -- lo purgó la política de
+    retención, que conserva el resultado analítico
+    (score/veredicto/reglas) pero no el contenido del correo indefinidamente.
+
+    410 Gone y no 404: el análisis existe de verdad y su resultado sigue
+    siendo consultable por otras vías (``GET /iris/results/<id>``); es
+    específicamente el raw, y solo el raw, lo que ha dejado de estar --
+    para siempre, no temporalmente, que es justo la diferencia entre 410 y
+    404/503.
+    """
+    default_code = ErrorCode.ENTITY_NOT_FOUND
+    default_status_code = 410
+
+    def __init__(self, analysis_id: int) -> None:
+        super().__init__(
+            f"El raw del análisis {analysis_id} ya no está disponible: "
+            "la política de retención lo ha purgado."
+        )
+
+
 class IrisExecutionError(IrisError):
     """Raised when an analysis fails to start or complete."""
     default_code = ErrorCode.SCAN_ERROR
@@ -69,6 +90,53 @@ class IrisMailboxConnectionNotFoundError(EntityNotFoundError, IrisError):
     id_field = "connection_id"
 
 
+class IrisTrustedSenderNotFoundError(EntityNotFoundError, IrisError):
+    """La excepción de confianza no existe o no es del usuario.
+
+    El mismo error para los dos casos, como el resto de entidades de Iris,
+    para que no se puedan enumerar ids ajenos.
+    """
+    entity_label = "Excepción de confianza"
+    entity_is_feminine = True
+    id_field = "trusted_sender_id"
+
+
+class IrisSavedViewNotFoundError(EntityNotFoundError, IrisError):
+    """La vista guardada no existe o no es del usuario (mismo error para los dos)."""
+    entity_label = "Vista guardada"
+    entity_is_feminine = True
+    id_field = "view_id"
+
+
+class IrisCaseNotFoundError(EntityNotFoundError, IrisError):
+    """El caso no existe o no es del usuario (mismo error para los dos)."""
+    entity_label = "Caso"
+    id_field = "case_id"
+
+
+class IrisBatchNotFoundError(EntityNotFoundError, IrisError):
+    """El lote no existe o no es del usuario (mismo error para los dos)."""
+    entity_label = "Lote"
+    id_field = "batch_id"
+
+
+class IrisBatchBackpressureError(IrisError):
+    """El lote llenaría la cola: el usuario ya tiene demasiados análisis en curso.
+
+    429 y no 400: la petición es válida, pero ahora no se puede atender;
+    reenviarla cuando terminen los análisis en marcha funciona.
+    """
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 429
+
+    def __init__(self, active: int, requested: int, limit: int) -> None:
+        message = (
+            f"Tienes {active} análisis en marcha y el lote añadiría {requested}; el máximo a la vez "
+            f"es {limit}. Espera a que terminen y vuelve a enviarlo: no se ha creado nada."
+        )
+        super().__init__(message, user_message=message)
+
+
 class IrisMailboxInvalidProviderError(IrisError):
     """Raised when connecting to an unsupported mailbox provider."""
     default_code = ErrorCode.VALIDATION_ERROR
@@ -89,3 +157,17 @@ class IrisMailboxOAuthStateError(IrisError):
     tampered, or never issued by start_connect (CSRF protection)."""
     default_code = ErrorCode.AUTHENTICATION_ERROR
     default_status_code = 400
+
+
+class IrisMailboxInvalidFolderError(IrisError):
+    """Raised when ``folder`` doesn't match any real folder/label the
+    provider returns for this account — wrong id, typo, or a value
+    that belongs to another provider."""
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+    def __init__(self, folder: str) -> None:
+        super().__init__(
+            f"'{folder}' no es una carpeta válida para esta cuenta.",
+            user_message=f"'{folder}' no es una carpeta válida para esta cuenta.",
+        )

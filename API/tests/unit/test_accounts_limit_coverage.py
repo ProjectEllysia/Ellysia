@@ -25,8 +25,8 @@ from src.modules.accounts.services.limits import (
 pytestmark = pytest.mark.unit
 
 
-#: Claves que todavía no se exigen, y por qué. Vaciar esta lista es el objetivo,
-#: y desde la fase 5 está vacía: todas pasan por caja.
+#: Claves que todavía no se exigen, y por qué. Está vacía: todas pasan por
+#: caja, y así debe seguir.
 DEFERRED: dict[LimitKey, str] = {}
 
 SRC_DIR = Path(__file__).resolve().parents[2] / "src" / "modules"

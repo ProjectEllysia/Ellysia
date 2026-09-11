@@ -1,4 +1,6 @@
-"""ScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""Clase base de los managers de escaneo: ciclo de vida común (creación, despacho
+a la cola de tareas y persistencia de resultados) que cada escáner concreto
+especializa."""
 
 import logging
 from abc import ABC, abstractmethod
@@ -9,6 +11,9 @@ import src.modules.system.config_reading as CR
 
 from src.modules.shared._exceptions import EllysiaException, ValidationError
 from src.modules.system.taskqueue import JobDeadlineExceeded, TaskQueue, TaskTrackingMixin
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox import build_dispatch
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
@@ -439,8 +444,8 @@ class ScanManager(TaskTrackingMixin, ABC):
         la clave ``rq:worker:<name>`` sobrevive con su TTL completo a una
         muerte abrupta, así que su mera existencia no prueba nada.
 
-        Mismo arreglo que Iris hizo en su reconciliación (#208); el defecto era
-        literalmente el mismo porque este método fue el espejo del que se copió.
+        Mismo arreglo que ya tenía la reconciliación de Iris; el defecto era
+        literalmente el mismo porque aquélla se copió de este método.
 
         Returns:
             Número de escaneos marcados como FAILED.
@@ -560,7 +565,7 @@ class ScanManager(TaskTrackingMixin, ABC):
 
         # El mismo plazo agotado que recoge ``LybraEngineManager._run_lybra``,
         # aquí para los tres escáneres que sí lanzan un subproceso. Hereda de
-        # ``BaseException`` (#395) para que no lo capture ningún ``except
+        # ``BaseException`` para que no lo capture ningún ``except
         # Exception``, y el precio era que la fila se quedaba en `running`
         # eternamente cuando la cola mataba el trabajo. Se cierra la fila y se
         # vuelve a lanzar, para que RQ siga viendo un trabajo fallido.
@@ -867,6 +872,39 @@ class ScanManager(TaskTrackingMixin, ABC):
     def run_scan(self, **kwargs) -> int:
         """Start a new scan. Returns the scan's primary key."""
 
+    def _build_scan(
+        self, target: str, user_id: int, programed_scan_id: Optional[int] = None, **extra
+    ) -> Scan:
+        """Construye —sin persistir— la fila de escaneo de ``self._MODEL``.
+
+        Extraído de ``_create_scan_record`` para que también lo use
+        ``_create_scan_and_dispatch``: los dos necesitan el mismo objeto, pero
+        cada uno lo guarda en una transacción distinta (una sola fila el
+        primero, fila + outbox el segundo). Duplicar la construcción habría
+        significado que añadir una columna al modelo obligase a acordarse de
+        los dos sitios.
+
+        Args:
+            target: Objetivo del escaneo, ya resuelto y validado por el
+                llamante (host, IP o URL, según el escáner).
+            user_id: Primary key del usuario dueño del escaneo.
+            programed_scan_id: Primary key del ``ProgramedScan`` que lo lanzó,
+                cuando viene del scheduler; ``None`` (por defecto) para un
+                escaneo lanzado a mano.
+            **extra: Columnas adicionales del modelo concreto — p. ej.
+                ``asset_id``/``source_scan_id`` de ``LybraScan``. Vacío para
+                los modelos que no tienen ninguna.
+
+        Returns:
+            Scan: Instancia de ``self._MODEL`` sin persistir, con
+                ``started_at`` ya fijado a la hora actual.
+        """
+        assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
+        return self._MODEL(
+            target=target, user_id=user_id, started_at=utcnow_naive(),
+            programed_scan_id=programed_scan_id, **extra,
+        )
+
     def _create_scan_record(
         self, target: str, user_id: int, programed_scan_id: Optional[int] = None, **extra
     ) -> Scan:
@@ -878,16 +916,92 @@ class ScanManager(TaskTrackingMixin, ABC):
         ``source_scan_id``/``asset_id``) pass them via ``**extra`` instead of
         overriding this method wholesale — see
         ``LybraEngineManager._create_scan_record``.
+
+        Crea la fila **y nada más**. Los ``run_scan()`` ya no lo usan: encolan
+        con ``_create_scan_and_dispatch``, que añade la fila de outbox en la
+        misma transacción. Sigue aquí porque es la forma corta de fabricar un
+        escaneo ya persistido sin encolar nada, que es justo lo que quieren las
+        pruebas que ejercitan el motor sin worker.
         """
-        assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
-        scan = self._MODEL(
-            target=target, user_id=user_id, started_at=utcnow_naive(),
-            programed_scan_id=programed_scan_id, **extra,
-        )
+        scan = self._build_scan(target, user_id, programed_scan_id, **extra)
         with UnitOfWork() as uow:
             ScanRepository(uow).save(scan)
             # Durable antes de encolar: el worker corre en otro proceso.
             uow.commit_for_handoff()
+        return scan
+
+    def _create_scan_and_dispatch(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, *, target: str, user_id: int, func: Callable, job_name: str,
+        timeout: int, trailing_args: tuple = (),
+        programed_scan_id: Optional[int] = None, **extra,
+    ) -> Scan:
+        """Crea el escaneo y su intención de encolado en la MISMA transacción, y publica.
+
+        Los cinco escáneres hacían lo mismo en dos pasos: ``_create_scan_record()``
+        confirmaba la fila y, ya fuera de esa transacción, un
+        ``TaskQueue.submit()`` publicaba el trabajo. Entre ambos hay una ventana
+        real — si la API muere o Redis falla justo ahí, el escaneo queda creado y
+        sin nadie que lo procese, con la cuota ya cobrada. La reconciliación de
+        arranque lo marca FAILED, pero solo al reiniciar la API y sin devolver la
+        cuota: el usuario paga por un escaneo que nunca corrió.
+
+        Aquí la fila ``TaskDispatch`` viaja en el mismo commit que el escaneo, así
+        que o existen las dos o no existe ninguna. Publicar viene después y ya no
+        es crítico: en el caso normal (Redis arriba) sale al instante y el escaneo
+        arranca sin latencia añadida; si falla, la fila se queda ``pending`` y la
+        recogen el barrido periódico o la reconciliación de arranque — ver
+        ``system/taskqueue/outbox.py``.
+
+        Vive en la base y no en cada escáner porque el cableado era idéntico en
+        los cinco: misma categoría, mismo ``external_id``, mismo margen de
+        timeout, y el ``scan_id`` siempre como primer argumento del job.
+
+        Args:
+            target: Objetivo del escaneo, ya resuelto y validado por el llamante.
+            user_id: Primary key del usuario dueño del escaneo.
+            func: ``@staticmethod`` ``execute_*`` que ejecutará el worker. Debe
+                ser importable por referencia (ver ``outbox.encode_func``): nunca
+                una lambda ni un closure.
+            job_name: Prefijo del id determinista del job; el nombre final es
+                ``f"{job_name}-{scan_id}"`` (p. ej. ``"NmapScan"`` →
+                ``"NmapScan-42"``). Debe ser RQ-safe: letras, números, ``_`` y ``-``.
+            timeout: Timeout del escaneo en segundos, **sin** margen. El margen
+                (``_scan_timeout_margin``) se suma aquí, que es lo que hacía cada
+                escáner por su cuenta.
+            trailing_args: Argumentos que siguen al ``scan_id`` en la llamada a
+                ``func``. Deben ser JSON-serializables — la outbox los guarda en
+                JSONB, no los picklea como hace RQ —, así que un dataclass hay que
+                convertirlo a dict antes de pasarlo por aquí (lo hace
+                ``LybraEngineManager.run_scan`` con sus ``Service``). Por defecto,
+                ninguno.
+            programed_scan_id: Primary key del ``ProgramedScan`` que lo lanzó,
+                cuando viene del scheduler; ``None`` (por defecto) si es manual.
+            **extra: Columnas adicionales del modelo concreto, como en
+                ``_build_scan``.
+
+        Returns:
+            Scan: El escaneo ya persistido. Que su job esté publicado o
+                todavía ``pending`` en la outbox no cambia lo que devuelve:
+                para el llamante el escaneo existe y acabará ejecutándose en
+                los dos casos, que es justo lo que aporta este mecanismo.
+        """
+        scan = self._build_scan(target, user_id, programed_scan_id, **extra)
+        with UnitOfWork() as uow:
+            ScanRepository(uow).save(scan)
+            scan_id = scan.id
+            dispatch = TaskDispatchRepository(uow).save(build_dispatch(
+                func=func,
+                name=f"{job_name}-{scan_id}",
+                category=self.TASK_CATEGORY,
+                args=(scan_id, *trailing_args),
+                external_id=self.external_id_for(scan_id),
+                timeout=timeout + self._scan_timeout_margin,
+            ))
+            dispatch_id = dispatch.id
+            # Durable antes de intentar publicar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
+
+        OutboxDispatcher.dispatch(dispatch_id, task_queue=self._task_queue)
         return scan
 
     def _previous_findings_map(
@@ -912,7 +1026,7 @@ class ScanManager(TaskTrackingMixin, ABC):
                 "state": previous_finding.state or "open",
                 "snapshot": snapshot,
                 # La decisión del usuario viaja aparte del snapshot porque no
-                # describe el hallazgo sino lo que alguien dijo sobre él (L35).
+                # describe el hallazgo sino lo que alguien dijo sobre él.
                 # Sin esto sobreviviría el estado pero no su justificación, y
                 # un `accepted` sin motivo ni autor vuelve a ser deuda al día
                 # siguiente de haberlo razonado.

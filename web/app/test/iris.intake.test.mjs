@@ -15,9 +15,15 @@
 
 import {
   FALLBACK_MAX_MESSAGE_BYTES,
+  MODE_HEADERS,
+  MODE_MESSAGE,
+  buildSubmission,
   classifyIntake,
+  isBatchDrop,
+  isZipFile,
   formatByteLimit,
   isEmlFile,
+  isMsgFile,
   resolveMaxMessageBytes,
 } from '../src/components/iris/intake.js'
 
@@ -97,6 +103,35 @@ eq('10 MB', formatByteLimit(10 * MB), '10 MB')
 eq('20 MB', formatByteLimit(20 * MB), '20 MB')
 eq('decimal por debajo de 10', formatByteLimit(2.5 * MB), '2.5 MB')
 eq('sin límite no hay texto', formatByteLimit(0), '')
+
+console.log('\nbuildSubmission — el modo viaja explícito')
+eq('modo cabeceras envía solo las cabeceras',
+  buildSubmission({ mode: MODE_HEADERS, headers: 'From: a', message: 'From: a\n\ncuerpo' }),
+  { mode: 'headers', headers: 'From: a' })
+eq('modo completo envía solo el mensaje',
+  buildSubmission({ mode: MODE_MESSAGE, headers: 'From: a', message: 'From: a\n\ncuerpo', title: 'T' }),
+  { mode: 'message', message: 'From: a\n\ncuerpo', title: 'T' })
+// Sin mensaje cargado (fichero truncado por tamaño o cabeceras pegadas a mano)
+// el modo completo no tiene nada que enviar: cae a cabeceras en vez de mandar
+// una petición que el servidor rechazaría.
+eq('modo completo sin mensaje cae a cabeceras',
+  buildSubmission({ mode: MODE_MESSAGE, headers: 'From: a', message: null }),
+  { mode: 'headers', headers: 'From: a' })
+eq('sin título no se envía la clave',
+  Object.keys(buildSubmission({ mode: MODE_HEADERS, headers: 'From: a', title: '' })),
+  ['mode', 'headers'])
+
+console.log('\nisBatchDrop — qué va a lote')
+check('un .eml suelto no es lote', !isBatchDrop([file('a.eml', 10)]))
+check('dos .eml son lote', isBatchDrop([file('a.eml', 10), file('b.eml', 10)]))
+check('un ZIP suelto es lote', isBatchDrop([file('buzon.zip', 10)]))
+check('un ZIP sin extensión se reconoce por tipo', isZipFile(file('buzon', 10, 'application/zip')))
+check('nada no es lote', !isBatchDrop([]))
+// El navegador no puede leer un .msg (es binario): lo convierte el servidor.
+check('un .msg suelto va a lote', isBatchDrop([file('aviso.msg', 10)]))
+check('un .msg en mayúsculas también', isBatchDrop([file('AVISO.MSG', 10)]))
+check('un .msg sin extensión se reconoce por tipo', isMsgFile(file('aviso', 10, 'application/vnd.ms-outlook')))
+check('un .eml no es un .msg', !isMsgFile(file('a.eml', 10)))
 
 console.log(`\n${passed} pasados, ${failed} fallidos`)
 process.exit(failed === 0 ? 0 : 1)

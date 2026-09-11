@@ -1,7 +1,7 @@
-"""The FTP dissector — Fase N's opening move into non-HTTP protocols.
+"""The FTP dissector — the simplest of the non-HTTP protocols.
 
-FTP is the cheapest possible entry into the roadmap's brecha G1 (protocols
-Lybra cannot yet identify at all): the server volunteers its whole identity
+FTP is the cheapest possible entry into protocols Lybra cannot yet identify
+at all: the server volunteers its whole identity
 unprompted, in the first line it sends after a bare TCP connect — no protocol
 negotiation, no framing, just a banner ending in ``\\r\\n``. The well-known
 ``vsftpd 2.3.4`` backdoor (CVE-2021-... no — CVE-2011-2523) is also one of the
@@ -14,7 +14,7 @@ Two banner shapes carry a version outright:
 - ``220 ProFTPD 1.3.5 Server (Debian) [...]`` — bare ``Product Version``
   tokens before any parenthetical comment (ProFTPD, and similar daemons).
 
-**Y muchos despliegues reales no llevan ninguna de las dos** (L48-a). El
+**Y muchos despliegues reales no llevan ninguna de las dos**. El
 saludo por defecto de ProFTPD en Debian es ``220 ProFTPD Server (Debian)
 [::ffff:...]``: nombra el producto y calla la versión, que es justo lo que
 recomienda cualquier guía de fortificación. Pure-FTPd hace lo mismo. Contra

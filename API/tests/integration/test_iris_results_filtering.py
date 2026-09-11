@@ -39,7 +39,7 @@ def _seed_connection(app, user_id: int) -> int:
             connection = IrisMailboxConnection(
                 user_id=user_id, provider="gmail", account_email="victim@example.com",
                 scopes="gmail.metadata",
-                refresh_token_enc=encrypt_at_rest("token", purpose="iris_mailbox"),
+                refresh_token="token",
                 status="active",
             )
             IrisMailboxConnectionRepository(uow).save(connection)

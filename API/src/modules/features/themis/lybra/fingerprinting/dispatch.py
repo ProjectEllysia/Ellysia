@@ -1,9 +1,9 @@
 """The dissector dispatch — replaces an if/elif chain with one entry per protocol.
 
-``LybraEngineManager._fingerprint_services`` used to ask, for every discovered
-service, "is this HTTP? SSH? FTP?" as a chain of ``if``/``elif`` branches, each
-running that protocol's own multi-step probe inline. Every new protocol Fase N
-adds meant a new branch in the manager. A :class:`Dissector` moves each
+Asking, for every discovered service, "is this HTTP? SSH? FTP?" as a chain of
+``if``/``elif`` branches would mean each branch runs that protocol's own
+multi-step probe inline, and every new protocol added means a new branch in
+the manager. A :class:`Dissector` moves each
 protocol's applicability test and probe logic into its own small object,
 registered once in :func:`~.default_dissectors`; the manager just asks each one
 in turn "does this apply, and if so, what did you find?" — adding protocol N+1
@@ -20,8 +20,7 @@ from ..engine import Service
 
 # Quality of Detection de un hallazgo de fingerprint: informativo y nada más.
 # Constata qué identificó el motor; nunca contribuye a la confianza de una
-# vulnerabilidad. Vivía en ``concordance.py`` hasta L52, cuando ese módulo se
-# fue al arnés de pruebas por medir contra Nmap dentro del producto.
+# vulnerabilidad.
 QOD_FINGERPRINT = 20
 
 
@@ -37,11 +36,11 @@ class DissectorResult:
             distinguirlo. Por defecto :data:`QOD_FINGERPRINT`, que es lo que
             todos los dissectors usaban y lo que sigue valiendo para los que
             leen una sola fuente. El de HTTP sí distingue —su versión puede
-            venir de seis sitios de calidad muy distinta— y lo aprovecha (L18).
+            venir de seis sitios de calidad muy distinta— y lo aprovecha.
         extra_layers: Las capas de servidor **adicionales** observadas en el
             mismo puerto, como tuplas ``(producto, versión, rol)``. Vacía en el
             caso normal, un elemento cuando hay un proxy inverso por delante de
-            un servidor distinto (L48-b). La primera capa no aparece aquí: ya
+            un servidor distinto. La primera capa no aparece aquí: ya
             viaja en ``product``/``version``.
     """
     product: Optional[str]
@@ -52,7 +51,7 @@ class DissectorResult:
 
 
 class Dissector:
-    """One protocol's Fase F/N identification strategy: applicability + probe.
+    """One protocol's identification strategy: applicability + probe.
 
     :meth:`probe` returns ``None`` only for a raw transport failure (connection
     refused, timeout, connection closed before anything usable arrived) — a

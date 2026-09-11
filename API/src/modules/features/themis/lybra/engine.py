@@ -1,9 +1,9 @@
 """The detection core — turns discovered services into normalized findings.
 
-This is the L2 "detection runtime" of the roadmap. Given the services found on a
-host, the engine produces :class:`Finding`-shaped dicts: always an informational
-"this port is open" finding, and — when a CVE lookup is wired in — one finding
-per known vulnerability that affects the service's product and version.
+Given the services found on a host, the engine produces :class:`Finding`-shaped
+dicts: always an informational "this port is open" finding, and — when a CVE
+lookup is wired in — one finding per known vulnerability that affects the
+service's product and version.
 
 Two design choices keep this module easy to reason about and to test:
 
@@ -46,7 +46,7 @@ QOD_OPEN_PORT = 30
 QOD_VERSION_MATCH = 70
 
 # Quality of Detection for a version-based match built from a Service whose
-# origin is "inventory" (Fase 0.9) — a package an agent read directly off the
+# origin is "inventory" — a package an agent read directly off the
 # host, not a guess from a network banner. There is no back-port ambiguity to
 # hedge against here: the installed version *is* the version, so the match is
 # both confirmed and scored close to an actively-confirmed check (QOD_CONFIRMED
@@ -59,9 +59,9 @@ QOD_INVENTORY_MATCH = 95
 # product/version came from Nmap's own naming ("Apache httpd") or from
 # Lybra's own HTTP/SSH fingerprint reading the Server header or SSH banner
 # directly ("Apache", "OpenSSH" — see lybra.fingerprinting), or from a Hygeia
-# inventory entry's raw name. Loaded from feeds/product_aliases.json (Fase
-# I-b, paso 3) rather than hand-written here, so a new alias is one JSON
-# entry, not a code change — the same "Lybra feed" pattern checks_feed.json
+# inventory entry's raw name. Loaded from feeds/product_aliases.json rather
+# than hand-written here, so a new alias is one JSON entry, not a code
+# change — the same "Lybra feed" pattern checks_feed.json
 # and tech_signatures.json already use. Both spellings for the same product
 # are kept as separate feed entries rather than normalized, since that keeps
 # the feed a flat, auditable list. The alternative to an explicit alias —
@@ -85,10 +85,10 @@ class Service:
         product: The product name, e.g. ``"Apache httpd"``. May be empty.
         version: The product version, e.g. ``"2.4.49"``. May be empty.
         cpe: A CPE string for the service if one is known, else ``None``.
-        origin: Where this reading came from — ``"network"`` (the only value
-            that existed before Fase 0.9): inferred from a banner, a CPE Nmap
-            emitted, or Lybra's own fingerprint. Or ``"inventory"``: a fact
-            read directly off the host (e.g. a package manager), not a guess.
+        origin: Where this reading came from — ``"network"``: inferred from a
+            banner, a CPE Nmap emitted, or Lybra's own fingerprint. Or
+            ``"inventory"``: a fact read directly off the host (e.g. a
+            package manager), not a guess.
             The engine uses this to decide how much to trust a version match
             (see :data:`QOD_INVENTORY_MATCH`) — it is not network vs. local in
             the transport sense, it is inferred vs. verified.
@@ -136,7 +136,7 @@ class LybraEngine:
             EPSS exploitation-probability score.
         product_alias_lookup: A callable ``(normalized_name) -> (vendor, product)
             | None`` — the automated index derived from the KB's own
-            ``CpeMatch`` rows (Fase I-b, paso 2), consulted only when neither an
+            ``CpeMatch`` rows, consulted only when neither an
             embedded CPE nor :data:`CPE_PRODUCT_OVERRIDES` resolved the service.
             ``None`` disables this third strategy, leaving the first two.
         feed_version: The reproducibility mark stamped on every finding this
@@ -184,9 +184,8 @@ class LybraEngine:
         findings: List[dict] = []
         for service in services:
             # Resolved once and shared: the informational finding records
-            # whether resolution succeeded (Fase I-b observability), and the
-            # version-match path reuses the same result instead of resolving
-            # the CPE twice.
+            # whether resolution succeeded, and the version-match path
+            # reuses the same result instead of resolving the CPE twice.
             resolved = _resolve_cpe(service, self._product_alias_lookup,
                                     self._record_resolution)
             findings.append(self._informational_finding(service, resolved))
@@ -213,7 +212,7 @@ class LybraEngine:
     def _version_finding(self, service: Service, cve, cpe23: str) -> dict:
         """Build a single version-match finding for a service and one CVE.
 
-        An ``origin="inventory"`` service (Fase 0.9) is a verified fact, not a
+        An ``origin="inventory"`` service is a verified fact, not a
         banner guess, so it earns a higher ``qod`` and is born ``confirmed`` —
         there is no back-port ambiguity to hedge against when the version came
         straight from the package manager.
@@ -240,7 +239,7 @@ class LybraEngine:
             "cvss_vector":  cve.cvss_vector,
             "epss_score":   self._epss_lookup(cve_id) if self._epss_lookup else None,
             "in_kev":       in_kev,
-            # L34: la tercera dimensión de explotabilidad, que el modelo
+            # La tercera dimensión de explotabilidad, que el modelo
             # prometía y nadie escribía. KEV dice "se explota ahora mismo" y
             # EPSS da una probabilidad; ésta dice si existe un exploit y cuán
             # usable es, que es lo que separa una urgencia de un deber.
@@ -253,11 +252,12 @@ class LybraEngine:
             "check_id":     "lybra:version-match@1",
             "feed_version": self._feed_version,
             "qod":          QOD_INVENTORY_MATCH if is_verified else QOD_VERSION_MATCH,
-            "confirmed":    is_verified,   # a network-inferred match stays a hypothesis; Fase R confirms it actively
+            "confirmed":    is_verified,   # a network-inferred match stays a hypothesis
+                                            # until an active check confirms it
             "cpe_resolved": True,   # this finding only exists because resolution succeeded
             "state":        "open",
             # Claves de trabajo, no columnas: la verificación de backports
-            # (Fase O) necesita la versión **cruda** del paquete —con su
+            # necesita la versión **cruda** del paquete —con su
             # revisión de distribución, que es lo que nombra al proveedor— y el
             # nombre con el que esa distribución lo llama. El repositorio las
             # descarta al persistir.
@@ -294,8 +294,8 @@ class LybraEngine:
         listening anywhere), so that case gets its own phrasing and category
         instead of a nonsensical "Puerto None abierto".
 
-        ``cpe_resolved`` (Fase I-b observability) records whether ``resolved``
-        — computed once in :meth:`analyze` — found a CPE, independent of
+        ``cpe_resolved`` records whether ``resolved`` — computed once in
+        :meth:`analyze` — found a CPE, independent of
         whether the KB then had any matching CVE. Without it, "no detections"
         and "could not even identify the package" are indistinguishable in
         the data, which is exactly the ambiguity that motivated this column.
@@ -327,17 +327,16 @@ class LybraEngine:
 def services_from_payload(raw: Iterable[dict]) -> List[Service]:
     """Build engine :class:`Service` values from an externally-supplied dataset.
 
-    Fase 0.9's third input mode: a convenience for a producer whose data
-    arrives as plain dicts rather than already-built ``Service`` instances —
-    the shape a future Hygeia inventory adapter, or any other in-process
-    caller, is likely to have. A caller that already builds ``Service``
-    directly does not need this at all; ``LybraEngineManager.run_scan``
-    accepts either.
+    A third input mode alongside :func:`services_from_discovered_ports`: a
+    convenience for a producer whose data arrives as plain dicts rather than
+    already-built ``Service`` instances — the shape a future Hygeia inventory
+    adapter, or any other in-process caller, is likely to have. A caller that
+    already builds ``Service`` directly does not need this at all;
+    ``LybraEngineManager.run_scan`` accepts either.
 
     Unlike :func:`services_from_discovered_ports`, this trusts an explicit
     ``"origin"`` key if the payload sets one, defaulting to ``"network"`` so a
-    producer that predates Fase 0.9 (there are none yet) would behave exactly
-    as those two functions do.
+    producer that does not set it behaves exactly as those two functions do.
 
     Args:
         raw: An iterable of dicts with the same keys as :class:`Service`'s
@@ -386,18 +385,18 @@ def _resolve_cpe(
     1. Trust the CPE Nmap emitted, if any — falling back to the banner version
        when the CPE itself left the version as a wildcard.
     2. Normalize the product name (:func:`~.kb.normalize_product_name`) and
-       look it up in :data:`CPE_PRODUCT_OVERRIDES` (the curated alias feed,
-       Fase I-b paso 3) — an exact, hand-verified match, including cases the
-       automated index (next) correctly refuses to guess: NVD itself tags
-       "7-zip" under two different vendors (the modern ``7-zip`` and the
-       legacy ``igor_pavlov``), which paso 2's grouping sees as ambiguous and
-       discards — a human confirming which vendor NVD actually uses today is
-       exactly what this feed is for.
+       look it up in :data:`CPE_PRODUCT_OVERRIDES` (the curated alias feed)
+       — an exact, hand-verified match, including cases the automated index
+       (next) correctly refuses to guess: NVD itself tags "7-zip" under two
+       different vendors (the modern ``7-zip`` and the legacy
+       ``igor_pavlov``), which the automated index's grouping sees as
+       ambiguous and discards — a human confirming which vendor NVD actually
+       uses today is exactly what this feed is for.
     3. Look the same normalized name up in the automated index derived from
-       the KB's own ``CpeMatch`` rows (Fase I-b paso 2, ``product_alias_lookup``)
-       — reached only when the curated feed missed. This is what makes a
-       desktop inventory (Fase I) resolvable at all: neither Nmap nor a
-       hand-written table was ever going to cover it alone.
+       the KB's own ``CpeMatch`` rows (``product_alias_lookup``) — reached
+       only when the curated feed missed. This is what makes a desktop
+       inventory resolvable at all: neither Nmap nor a hand-written table was
+       ever going to cover it alone.
 
     Both 2 and 3 key off the *normalized* name, not the raw string — a
     desktop inventory entry routinely bakes the version into the name itself
@@ -416,7 +415,7 @@ def _resolve_cpe(
             detection entirely.
         record_resolution: Callback ``(nombre_normalizado, origen, resuelto)``
             para llevar la cuenta de qué nombres de producto no se consiguen
-            resolver (L37). Se invoca **sólo** cuando el nombre y la versión
+            resolver. Se invoca **sólo** cuando el nombre y la versión
             existen y aun así ninguna estrategia dio con el CPE: eso es
             exactamente "falta un alias", que es lo que el ranking tiene que
             saber. Un servicio sin versión concreta o sin nombre no falla por

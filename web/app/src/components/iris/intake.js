@@ -5,7 +5,7 @@
  * son funciones puras sin DOM, igual que `components/hygeia/format.js`, así
  * que corren con `node` a secas (ver `test/iris.intake.test.mjs`).
  *
- * El segundo es el que motiva B13. El tope de tamaño estaba escrito a mano en
+ * El segundo es la razón de ser de este módulo. El tope de tamaño estaba escrito a mano en
  * la vista (`20 * 1024 * 1024`) mientras el backend aplicaba otro
  * (`iris.maxMessageBytes`, 10 MiB): el usuario elegía un fichero que la
  * interfaz daba por bueno, esperaba a que se cargara entero en memoria y
@@ -73,6 +73,58 @@ export function classifyIntake(file, capabilities) {
     headersOnly,
     limit,
   }
+}
+
+/** Modos de análisis que acepta `POST /iris/analyze` en su campo `mode`. */
+export const MODE_HEADERS = 'headers'
+export const MODE_MESSAGE = 'message'
+
+/**
+ * Cuerpo de `POST /iris/analyze` para el modo que eligió el usuario.
+ *
+ * El modo viaja explícito y solo se envía el campo de ese modo: el servidor
+ * valida únicamente lo que va a analizar, así que elegir «solo cabeceras»
+ * sobre un `.eml` enorme no puede acabar en un rechazo por el tamaño de un
+ * mensaje que no se usa. El modo completo sin mensaje cargado cae a cabeceras
+ * en vez de enviar una petición que el servidor rechazaría.
+ *
+ * @param {{mode: string, headers: string, message?: string|null, title?: string}} input
+ * @returns {{mode: string, headers?: string, message?: string, title?: string}}
+ */
+export function buildSubmission({ mode, headers, message, title }) {
+  const body = mode === MODE_MESSAGE && message
+    ? { mode: MODE_MESSAGE, message }
+    : { mode: MODE_HEADERS, headers }
+  if (title) body.title = title
+  return body
+}
+
+/** ¿Es un ZIP? Por extensión o por tipo MIME, igual que `isEmlFile`. */
+export function isZipFile(file) {
+  if (!file) return false
+  return /\.zip$/i.test(file.name ?? '') || ['application/zip', 'application/x-zip-compressed'].includes(file.type)
+}
+
+/** ¿Es un `.msg` de Outlook? Por extensión o por el tipo MIME que le ponen
+ *  algunos sistemas (`application/vnd.ms-outlook`). */
+export function isMsgFile(file) {
+  if (!file) return false
+  return /\.msg$/i.test(file.name ?? '') || file.type === 'application/vnd.ms-outlook'
+}
+
+/**
+ * ¿Se analiza como lote? Sí si llega más de un fichero, algún ZIP o algún
+ * `.msg`: un `.eml` suelto sigue el camino de siempre (se carga en el
+ * formulario para elegir el modo), y lo demás va a `POST /iris/analyze/batch`,
+ * que es quien decide qué entra y qué se rechaza.
+ *
+ * Un `.msg` va siempre a lote aunque llegue solo porque es un fichero binario
+ * de Outlook: el navegador no puede sacar de él las cabeceras para el
+ * formulario, y el servidor sí sabe convertirlo a `.eml`.
+ */
+export function isBatchDrop(files) {
+  const list = Array.from(files ?? [])
+  return list.length > 1 || list.some((file) => isZipFile(file) || isMsgFile(file))
 }
 
 /** Tamaño legible para el aviso que ve el usuario ("10 MB"). */

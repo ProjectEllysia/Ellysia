@@ -1,6 +1,6 @@
 """
-Tests unitarios de hygeia.services.stats: media ponderada por duración
-(P21), energía y coste (P23) y su clasificación de procedencia (P24).
+Tests unitarios de hygeia.services.stats: media ponderada por duración,
+energía y coste, y su clasificación de procedencia.
 
 Sin base de datos ni Flask: son funciones puras sobre secuencias de
 ``(instante, vatios)`` construidas a mano.
@@ -27,7 +27,7 @@ def _series(hours: list[float]) -> list[tuple[datetime, float]]:
 
 
 # =============================================================================
-# P21 — MEDIA PONDERADA POR DURACIÓN
+# MEDIA PONDERADA POR DURACIÓN
 # =============================================================================
 
 def test_regular_samples_match_the_simple_average():
@@ -91,7 +91,7 @@ def test_unordered_input_is_sorted_before_computing():
 
 
 # =============================================================================
-# P23 — ENERGÍA Y COSTE
+# ENERGÍA Y COSTE
 # =============================================================================
 
 def test_the_plans_literal_example_250w_4h_1kwh():
@@ -122,7 +122,7 @@ def test_zero_observed_duration_with_average_still_yields_none():
 
 
 # =============================================================================
-# P24 — CLASIFICACIÓN DE PROCEDENCIA
+# CLASIFICACIÓN DE PROCEDENCIA
 # =============================================================================
 
 def test_full_coverage_within_retention_is_observed():

@@ -1,8 +1,7 @@
 """Tests unitarios de los conectores de buzón (Gmail / Microsoft Graph).
 
 Todo el HTTP está mockeado (``unittest.mock.patch`` sobre ``requests.get``/
-``requests.post``) -- sin red real, sin credenciales OAuth reales. Ver
-plans/feature/iris/iris-mailbox-connector.md Fase 4.
+``requests.post``) -- sin red real, sin credenciales OAuth reales.
 """
 
 from __future__ import annotations
@@ -147,6 +146,21 @@ def test_gmail_revoke_tolerates_already_revoked_token():
     post.assert_called_once()
 
 
+def test_gmail_list_folders_maps_system_and_user_labels():
+    connector = GmailConnector("https://app.example.com/iris/mailbox/callback")
+    payload = {"labels": [
+        {"id": "INBOX", "name": "INBOX", "type": "system"},
+        {"id": "Label_1", "name": "Facturas", "type": "user"},
+    ]}
+    with mock.patch("requests.get", return_value=_response(payload)):
+        folders = connector.list_folders("access-token")
+
+    assert [(f.provider_id, f.display_name, f.folder_type) for f in folders] == [
+        ("INBOX", "INBOX", "system"),
+        ("Label_1", "Facturas", "user"),
+    ]
+
+
 def test_gmail_missing_env_vars_raise_clear_error(monkeypatch):
     monkeypatch.delenv("GMAIL_CLIENT_ID", raising=False)
     with pytest.raises(ValueError, match="GMAIL_CLIENT_ID"):
@@ -225,7 +239,7 @@ def test_graph_list_new_with_cursor_caches_headers_from_delta_response():
     assert raw == "From: a@b.com\r\n"
 
 
-# B12: el deltaLink de Graph es un token opaco que puede rebasar los 255
+# El deltaLink de Graph es un token opaco que puede rebasar los 255
 # caracteres que la columna `sync_cursor` permitía. Estos tests fijan que el
 # conector lo devuelve intacto — cualquier recorte lo invalida, y un cursor
 # inválido tira la sincronización incremental al bootstrap.
@@ -297,6 +311,35 @@ def test_graph_fetch_raw_returns_response_text_directly():
     with mock.patch("requests.get", return_value=resp):
         raw = connector.fetch_raw("access-token", MessageRef(provider_message_id="msg-1"))
     assert raw.startswith("From: a@b.com")
+
+
+def test_graph_list_folders_maps_well_known_and_user_created():
+    connector = GraphConnector("https://app.example.com/iris/mailbox/callback")
+    payload = {"value": [
+        {"id": "AAA1", "displayName": "Inbox", "wellKnownName": "inbox"},
+        {"id": "BBB2", "displayName": "Clientes"},
+    ]}
+    with mock.patch("requests.get", return_value=_response(payload)):
+        folders = connector.list_folders("access-token")
+
+    assert [(f.provider_id, f.display_name, f.folder_type) for f in folders] == [
+        ("AAA1", "Inbox", "system"),
+        ("BBB2", "Clientes", "user"),
+    ]
+
+
+def test_graph_list_folders_paginates_via_next_link():
+    connector = GraphConnector("https://app.example.com/iris/mailbox/callback")
+    page1 = _response({
+        "value": [{"id": "AAA1", "displayName": "Inbox", "wellKnownName": "inbox"}],
+        "@odata.nextLink": "https://graph.microsoft.com/next-page",
+    })
+    page2 = _response({"value": [{"id": "BBB2", "displayName": "Clientes"}]})
+    with mock.patch("requests.get", side_effect=[page1, page2]) as get:
+        folders = connector.list_folders("access-token")
+
+    assert [f.provider_id for f in folders] == ["AAA1", "BBB2"]
+    assert get.call_args_list[1].args[0] == "https://graph.microsoft.com/next-page"
 
 
 def test_graph_revoke_does_not_raise_platform_limitation():

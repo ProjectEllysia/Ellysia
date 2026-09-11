@@ -53,6 +53,7 @@
             <div class="drop-divider"></div>
             <router-link to="/usuarios" class="drop-item" @click="open = false">Usuarios</router-link>
             <router-link to="/logs" class="drop-item" @click="open = false">Logs del sistema</router-link>
+            <router-link to="/admin/iris/simulador" class="drop-item" @click="open = false">Simulador de reglas (Iris)</router-link>
             <router-link v-if="auth.isRoot" to="/config" class="drop-item" @click="open = false">Configuración</router-link>
             <router-link v-if="auth.isRoot" to="/admin/planes" class="drop-item" @click="open = false">Gestor de planes</router-link>
             <router-link to="/queue" class="drop-item" @click="open = false">Cola de tareas</router-link>
@@ -139,7 +140,7 @@ async function resend() {
   }
 }
 
-/** El toggle de organización es lo único que el plan sí "concede" (§5.1). */
+/** El toggle de organización es lo único que el plan sí "concede". */
 const canCreateOrganization = computed(() => account.plan?.organizationEnabled === true)
 
 function logout() {
@@ -153,9 +154,9 @@ let clickOutside = null
 onMounted(() => {
   // El plan y la organización se piden aquí y no en el arranque de la sesión:
   // este menú es el único que los necesita para decidir qué entradas enseña, y
-  // lo monta toda la aplicación. Cargarlos solo en MyPlanView dejaba el menú
+  // lo monta toda la aplicación. Cargarlos solo en MyPlanView dejaría el menú
   // sin la tarjeta del plan ni las entradas de organización en cualquier otra
-  // vista — que es justo lo que el §10.2 del diseño quería resolver.
+  // vista.
   if (auth.isAuthenticated && !account.plan) account.loadAll()
   if (auth.isAuthenticated && !profileStore.profile.first_name && !profileStore.profile.last_name) profileStore.loadProfile()
 

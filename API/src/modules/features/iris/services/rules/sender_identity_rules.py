@@ -31,19 +31,20 @@ import re
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..wordlists import (
-    brand_trusted_domains, canonical_brands, multi_level_tlds,
+    brand_trusted_domains, canonical_brands,
     subdomain_action_words, suspicious_tlds,
 )
 from ..text import (
     extract_display_name, extract_domain, is_free_provider,
     is_plausible_typo, levenshtein, normalize_homoglyphs,
-    registrable_domain, registrable_label,
+    public_suffix, registrable_domain, registrable_label,
 )
+from ..idn import IdnVerdict, assess_domain, skeleton, to_unicode
 from ..parsers import decode_mime_words
 
 
 @iris_rules.register(
-    name="From header check", category="header_analysis", family="identity",
+    name="From header check", rule_id="iris.identity.from_header", severity="low", evidence_headers=("from",), category="header_analysis", family="identity",
     description="Verifica que la cabecera From esté presente y no esté vacía",
 )
 def check_from_header(headers: dict) -> RuleResult:
@@ -78,7 +79,7 @@ def _domain_matches_trusted(domain: str, trusted_domains: tuple[str, ...]) -> bo
 
 
 @iris_rules.register(
-    name="Display Name Spoofing", category="header_analysis", family="identity",
+    name="Display Name Spoofing", rule_id="iris.identity.display_name_spoofing", severity="high", mitre_techniques=("T1656",), evidence_headers=("from",), category="header_analysis", family="identity",
     description="Detecta si el nombre del remitente suplanta a una marca conocida pero el dominio del correo no pertenece a ella",
 )
 def check_display_name_spoof(headers: dict) -> RuleResult:
@@ -198,7 +199,7 @@ def _is_random_local(local: str) -> bool:
 
 
 @iris_rules.register(
-    name="Display Name Email Mismatch",
+    name="Display Name Email Mismatch", rule_id="iris.identity.display_name_email_mismatch", severity="medium", mitre_techniques=("T1656",), evidence_headers=("from",),
     category="header_analysis", family="identity",
     description=(
         "Detecta cuando el display name suplanta a una organización pero "
@@ -245,7 +246,7 @@ def check_display_name_email_mismatch(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Lookalike Sender Domain", category="header_analysis", family="identity",
+    name="Lookalike Sender Domain", rule_id="iris.identity.lookalike_sender_domain", severity="critical", mitre_techniques=("T1583.001", "T1656",), evidence_headers=("from",), category="header_analysis", family="identity",
     description="Detecta si el dominio real del remitente imita a una marca conocida (typosquatting, homóglifos, cousin domain o punycode/IDN)",
 )
 def check_lookalike_domain(headers: dict) -> RuleResult:
@@ -264,19 +265,32 @@ def check_lookalike_domain(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
-    # Punycode / IDN homograph — any xn-- label is inherently suspicious.
-    if any(label.startswith("xn--") for label in domain.split(".")):
+    # Un IDN (``xn--``) solo es sospechoso si imita una marca o mezcla
+    # alfabetos; uno legítimo de un solo alfabeto sigue el análisis normal,
+    # sobre su esqueleto visual.
+    idn = assess_domain(domain, canonical_brands())
+    if idn.is_suspicious:
+        is_homograph = idn.verdict == IdnVerdict.BRAND_HOMOGRAPH
         return RuleResult(
             score=CR.get_iris_scoring_weight("lookalike_domain.punycode", -15), verdict="fail",
-            details={"domain": domain, "type": "punycode"},
+            details={
+                "domain": domain, "unicode_domain": idn.unicode_domain,
+                "type": "idn_homograph" if is_homograph else "idn_mixed_script",
+                "label": idn.label, "scripts": list(idn.scripts), "brand": idn.brand,
+            },
             recommendation=(
-                f"El dominio del remitente ({domain}) usa codificación punycode (IDN, 'xn--'). "
-                "Es una técnica habitual para registrar dominios que parecen marcas conocidas "
-                "usando caracteres Unicode visualmente idénticos. Trátalo como phishing."
+                f"El dominio del remitente ({domain}, que se lee «{idn.unicode_domain}») "
+                + (f"usa caracteres de otro alfabeto que se ven igual que «{idn.brand}». "
+                   if is_homograph else
+                   f"mezcla alfabetos en una misma palabra ({', '.join(idn.scripts)}), algo que "
+                   "ningún idioma hace. ")
+                + "Es la técnica de homógrafos IDN para suplantar dominios. Trátalo como phishing."
             ),
         )
 
     label = registrable_label(domain)
+    if idn.verdict == IdnVerdict.VALID_IDN:
+        label = skeleton(to_unicode(label))
     if not label:
         return RuleResult(score=1, verdict="pass", details={"domain": domain}, recommendation=None)
 
@@ -326,7 +340,7 @@ def _is_trusted_brand_domain(domain: str) -> bool:
 
 
 @iris_rules.register(
-    name="Subdomain Impersonation",
+    name="Subdomain Impersonation", rule_id="iris.identity.subdomain_impersonation", severity="high", mitre_techniques=("T1583.001",), evidence_headers=("from",),
     category="header_analysis", family="identity",
     description=(
         "Detecta trucos de subdominio donde un nombre de marca conocido aparece "
@@ -346,13 +360,15 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
     if _is_trusted_brand_domain(domain):
         return RuleResult(score=1, verdict="pass", details={"domain": domain}, recommendation=None)
 
-    if "xn--" in domain:
+    idn = assess_domain(domain, canonical_brands())
+    if idn.is_suspicious:
         return RuleResult(
             score=CR.get_iris_scoring_weight("subdomain_impersonation.punycode", -10), verdict="fail",
-            details={"domain": domain, "type": "punycode_in_subdomain"},
+            details={"domain": domain, "unicode_domain": idn.unicode_domain,
+                     "type": "punycode_in_subdomain", "idn_verdict": idn.verdict.value, "brand": idn.brand},
             recommendation=(
-                f"El dominio {domain} usa codificación punycode. Combinado con la "
-                "imposible coincidencia con un subdominio, es muy probable phishing."
+                f"El dominio {domain} (se lee «{idn.unicode_domain}») usa caracteres Unicode "
+                "que imitan otro nombre o mezclan alfabetos. Es muy probable phishing."
             ),
         )
 
@@ -364,8 +380,10 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
     if reg_label in brands:
         return RuleResult(score=0, verdict="neutral", details={"domain": domain}, recommendation=None)
 
-    pre_labels = [label for label in labels[:-2] if label] if ".".join(labels[-2:]) in multi_level_tlds() \
-        else [label for label in labels[:-1] if label]
+    # Todas las etiquetas salvo el sufijo público: los subdominios más la
+    # registrable.
+    suffix_length = len(public_suffix(domain).split("."))
+    pre_labels = [label for label in labels[:-suffix_length] if label]
 
     findings: list[dict] = []
 
@@ -468,7 +486,7 @@ def _find_typosquats(text: str) -> list[dict]:
 
 
 @iris_rules.register(
-    name="Misspelled Brand Names", category="content_analysis", family="identity",
+    name="Misspelled Brand Names", rule_id="iris.identity.misspelled_brand_names", severity="medium", mitre_techniques=("T1656",), evidence_headers=("from", "subject"), category="content_analysis", family="identity",
     description="Detecta homóglifos y errores tipográficos de marcas conocidas en el asunto y nombre del remitente",
 )
 def check_misspelled_brands(headers: dict) -> RuleResult:
@@ -518,7 +536,7 @@ def check_misspelled_brands(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Suspicious TLD", category="header_analysis", family="identity",
+    name="Suspicious TLD", rule_id="iris.identity.suspicious_tld", severity="low", evidence_headers=("from", "reply-to", "return-path"), category="header_analysis", family="identity",
     description="Detecta si el dominio del remitente usa TLDs frecuentemente asociados con phishing",
 )
 def check_suspicious_tld(headers: dict) -> RuleResult:
@@ -553,7 +571,7 @@ def check_suspicious_tld(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
-    # Dedupe by domain before scoring (B4): the same domain in From,
+    # Dedupe by domain before scoring: the same domain in From,
     # Reply-To *and* Return-Path is one suspicious fact, not three — the
     # loop above appends one entry per header it appears in, so a single
     # domain could otherwise cost -15 instead of -5.
@@ -600,7 +618,7 @@ def _recipient_domain(headers: dict) -> str | None:
 
 
 @iris_rules.register(
-    name="Recipient Domain Lookalike",
+    name="Recipient Domain Lookalike", rule_id="iris.identity.recipient_domain_lookalike", severity="critical", mitre_techniques=("T1583.001", "T1656",), evidence_headers=("from", "to"),
     category="header_analysis", family="identity",
     description=(
         "Detecta cuando el dominio del remitente es un typosquat/homoglifo "
@@ -666,12 +684,12 @@ def check_recipient_domain_lookalike(headers: dict) -> RuleResult:
 
 
 # Cualquier cosa con forma de dirección de correo, para detectar un display
-# name que ES una dirección en vez de un nombre (G-C).
+# name que ES una dirección en vez de un nombre.
 _EMAIL_LIKE_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
 
 
 @iris_rules.register(
-    name="Display Name Foreign Address",
+    name="Display Name Foreign Address", rule_id="iris.identity.display_name_foreign_address", severity="high", mitre_techniques=("T1656",), evidence_headers=("from",),
     category="header_analysis", family="identity",
     description=(
         "Detecta cuando el display name del remitente ES una dirección de "

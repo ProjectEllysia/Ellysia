@@ -1,0 +1,48 @@
+{
+  "version": "2026-09-11",
+  "description": "Corpus sintético de Iris: mensajes inventados (ningún correo real ni dato personal), cada uno con la etiqueta que le daría un analista. Lo usan las métricas de feedback y el replay de versiones del detector; añadir o reetiquetar una muestra obliga a subir la versión.",
+  "samples": [
+    {
+      "id": "legit_newsletter_esp",
+      "file": "legit_newsletter_esp.eml",
+      "label": "legitimate",
+      "description": "Boletín de marketing enviado por un ESP (Mailchimp/SendGrid)."
+    },
+    {
+      "id": "legit_corporate_notice",
+      "file": "legit_corporate_notice.eml",
+      "label": "legitimate",
+      "description": "Aviso interno de RRHH con pie de confidencialidad."
+    },
+    {
+      "id": "legit_bank_alert",
+      "file": "legit_bank_alert.eml",
+      "label": "legitimate",
+      "description": "Alerta de seguridad bancaria legítima, sin enlaces."
+    },
+    {
+      "id": "legit_order_confirmation",
+      "file": "legit_order_confirmation.eml",
+      "label": "legitimate",
+      "description": "Recibo transaccional en inglés vía Postmark."
+    },
+    {
+      "id": "phish_credential_lookalike",
+      "file": "phish_credential_lookalike.eml",
+      "label": "malicious",
+      "description": "Suplantación de PayPal con dominio parecido y autenticación fallida."
+    },
+    {
+      "id": "phish_bec_free_provider",
+      "file": "phish_bec_free_provider.eml",
+      "label": "malicious",
+      "description": "Fraude del CEO desde Gmail pidiendo una transferencia."
+    },
+    {
+      "id": "phish_ip_link_executable",
+      "file": "phish_ip_link_executable.eml",
+      "label": "malicious",
+      "description": "Enlace camuflado a una IP literal y ejecutable con doble extensión."
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-"""B03: un análisis que se rompe acaba en un estado terminal con motivo.
+"""Un análisis que se rompe acaba en un estado terminal con motivo.
 
 Antes, el parseo y la validación del mensaje vivían **fuera** de todo bloque
 ``try`` de ``IrisManager._run_analysis``. Una excepción ahí —un parser que

@@ -85,7 +85,7 @@ class AIGenerator:
             self._failures += 1
             self._last_failure_time = time.time()
 
-    # ── Guardarraíl de tamaño (Issue #118) ──────────────────────────────────
+    # ── Guardarraíl de tamaño ───────────────────────────────────────────────
 
     @staticmethod
     def _check_payload_size(ai_input: AIInput) -> None:
@@ -93,8 +93,7 @@ class AIGenerator:
 
         Registra el tamaño estimado incluso cuando no excede el límite —
         observabilidad para diagnosticar el próximo 429 sin depender de que
-        el backend lo reporte, que es exactamente lo que faltó para
-        diagnosticar el caso original de este issue.
+        el backend lo reporte.
         """
         import src.modules.system.config_reading as CR
 
@@ -131,7 +130,7 @@ class AIGenerator:
             CircuitBreakerOpenError: Si el breaker del backend está abierto.
             AIPayloadTooLargeError: Si el prompt estimado supera el tope
                 configurado — se comprueba antes de llamar a la estrategia y
-                no se reintenta (Issue #118): un prompt sobredimensionado
+                no se reintenta: un prompt sobredimensionado
                 falla igual en cada intento, así que reintentarlo solo
                 desperdicia llamadas y tiempo.
             AIFallbackExhaustedError: Si se agotan los reintentos.

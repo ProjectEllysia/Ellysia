@@ -1,4 +1,4 @@
-"""Unit tests for the Lybra knowledge base logic (Fase 2).
+"""Unit tests for the Lybra knowledge base logic.
 
 Pure functions only — version comparison/ranges, CPE normalization, and feed
 ingest from decoded records. The network fetchers are the thin edge and are not
@@ -329,7 +329,7 @@ def test_the_longest_possible_v4_vector_fits_in_the_column():
     assert len(peor_caso) <= CveEntry.__table__.c.cvss_vector.type.length
 
 
-# ------------------------------------------------- platform-gated CVEs (#118)
+# -------------------------------------------------------- platform-gated CVEs
 
 def _and_node_item(platform_cpe: str) -> dict:
     """One CVE whose only applicability node ANDs an Apache match with a
@@ -352,7 +352,7 @@ def test_ingest_nvd_cve_and_node_tags_software_match_with_platform():
     """NVD's 'product AND platform' node shape must gate the software row
     with the platform's product token — the mechanism behind CVE-2024-38472-
     style ("...on Windows") false positives reported against non-Windows
-    hosts (Issue #118)."""
+    hosts."""
     item = _and_node_item("cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*")
     _cve, matches = ingest_nvd_cve(item)
     assert len(matches) == 1  # the platform-only cpeMatch produces no row of its own
@@ -462,7 +462,7 @@ def test_a_header_without_a_date_leaves_the_field_empty():
     assert list(parse_epss_rows(csv_text))[0]["scored_at"] is None
 
 
-# --------------------------------------- product name normalization (Fase I-b)
+# --------------------------------------- product name normalization
 
 @pytest.mark.parametrize("raw,expected", [
     # The real case that motivated this: a Hygeia inventory entry bakes the
@@ -513,7 +513,7 @@ def test_extract_trailing_version(raw, expected):
     assert extract_trailing_version(raw) == expected
 
 
-# ---------------------------------------------- curated alias feed (paso 3)
+# ---------------------------------------------- curated alias feed
 
 def test_load_product_aliases_covers_known_entries():
     aliases = load_product_aliases()
@@ -521,7 +521,7 @@ def test_load_product_aliases_covers_known_entries():
     assert aliases["openssh"] == ("openbsd", "openssh")
     assert aliases["nginx"] == ("nginx", "nginx")
     # A case NVD itself makes ambiguous (multiple vendors for "git") that the
-    # automated index (paso 2) correctly refuses to guess — resolved here by hand.
+    # automated index correctly refuses to guess — resolved here by hand.
     assert aliases["git"] == ("git-scm", "git")
     # Feed keys are normalized-name shaped (spaces, not hyphens) so they line
     # up with what normalize_product_name actually produces.
@@ -559,7 +559,7 @@ def test_version_scheme_mismatches_are_deliberately_not_aliased(raw_name):
     assert normalize_product_name(raw_name) not in load_product_aliases()
 
 
-# ───────────── la referencia de exploit que NVD ya etiquetaba (L34)
+# ───────────── la referencia de exploit que NVD ya etiquetaba
 
 
 def test_an_exploit_tagged_reference_is_picked_up():
@@ -594,7 +594,7 @@ def test_a_cve_with_no_references_at_all_does_not_blow_up():
     assert row["has_exploit_reference"] is False
 
 
-# ─────────────── avisos de distribución: OVAL y CSAF (Fase O, L32)
+# ─────────────── avisos de distribución: OVAL y CSAF
 
 
 _OVAL_DOC = """<?xml version="1.0"?>

@@ -1,4 +1,4 @@
-"""El feed de checks está bien formado (L27).
+"""El feed de checks está bien formado.
 
 El feed son **datos que se ejecutan**: diecisiete reglas en YAML que deciden si
 un hallazgo de seguridad existe. Hasta ahora ningún test comprobaba que
@@ -104,13 +104,13 @@ def test_a_script_without_plugin_is_reported(feed):
 
 
 def test_a_network_service_without_predicate_is_reported(feed):
-    """El caso de #272: un check ``network`` para un protocolo que ningún
-    predicado reconoce. Aquel arreglo lo hizo fallar al cargar; esta validación
+    """Un check ``network`` para un protocolo que ningún predicado reconoce.
+    Cargar el feed ya falla en ese caso; esta validación
     lo encuentra además sobre un feed externo, que no pasa por ese camino."""
-    # El nombre tiene que ser uno que ningún `is_*_service` reconozca. Aquí
-    # estuvo "postgres" hasta que L12 le dio su predicado, que es justo la
-    # forma en la que este test se mantiene honesto: el día que el protocolo
-    # inventado deja de estar inventado, hay que inventar otro.
+    # El nombre tiene que ser uno que ningún `is_*_service` reconozca. Si algún
+    # día se le da predicado a "protocolo-inventado", este test deja de ser
+    # honesto y hay que inventar otro: cada protocolo real que gane predicado
+    # deja de servir como caso negativo.
     broken = replace(_first_of_type(feed, "network"), service="protocolo-inventado")
     assert any("predicado" in problem for problem in validate_checks([broken]))
 

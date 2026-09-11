@@ -1,6 +1,6 @@
-"""Medición formal de precisión de las tres familias de la Fase R (roadmap §10).
+"""Medición formal de precisión de tres familias de checks.
 
-El número que la Fase R pide para darse por cerrada es explícito: *"familias de
+El número que este banco exige es explícito: *"familias de
 TLS, cabeceras y paths con precisión ≥ 0,9 medida contra el catálogo de imágenes
 etiquetadas"*. Hasta ahora ``test_lybra_oracle_bench.py`` afirmaba
 target-a-target ("en este contenedor debe salir este check"), que es una prueba
@@ -16,7 +16,7 @@ los objetivos:
     FN = estaba declarado y no disparó
     precisión = TP / (TP + FP)           recall = TP / (TP + FN)
 
-La aserción dura es solo sobre la precisión, que es lo que el roadmap fija como
+La aserción dura es solo sobre la precisión, que es lo que este banco fija como
 umbral; el recall se mide y se imprime porque un banco con precisión perfecta y
 recall ruinoso sería trivial de conseguir (no disparar nunca) y hay que poder
 verlo.
@@ -24,7 +24,7 @@ verlo.
 **Los señuelos son la mitad del banco a propósito.** ``nginx-endurecido`` manda
 la familia entera de cabeceras —la que declare el feed en cada momento, no una
 lista fija: se quedó en tres cuando el feed pasó a seis y dejó de ser un control
-negativo (#455)— y no debe producir ni un hallazgo de esa familia;
+negativo— y no debe producir ni un hallazgo de esa familia;
 ``nginx-senuelos`` sirve un 200 en las rutas que los checks de ``exposed_path``
 piden, pero con un cuerpo que no es lo que el check busca — un ``.git/config``
 que no es un config de Git, un ``backup.sql`` que no es un volcado. Un check que
@@ -60,9 +60,9 @@ pytestmark = [pytest.mark.oracle, pytest.mark.integration]
 _DOCKER = resolve_docker()
 pytestmark.append(pytest.mark.skipif(_DOCKER is None, reason="Docker no disponible"))
 
-# Las tres familias que el número de la Fase R nombra. Todo lo demás que emita
+# Las tres familias que este banco mide. Todo lo demás que emita
 # el motor (open_port, fingerprint, outdated_software...) queda fuera del
-# cómputo: son otras fases y otros números.
+# cómputo: son otras mediciones y otros números.
 _MEASURED_CATEGORIES = {"exposed_path", "security_header", "tls"}
 
 _PRECISION_THRESHOLD = 0.9
@@ -74,11 +74,11 @@ _HTTP_PORT = 8080
 _TLS_PORT = 8443
 
 # La familia de cabeceras se **deriva del feed**, no se escribe aquí. Estuvo
-# escrita a mano, con tres identificadores, y cuando el feed creció (#296) nadie
+# escrita a mano, con tres identificadores, y cuando el feed creció nadie
 # la actualizó: los tres checks nuevos —CSP, Referrer-Policy y
 # Permissions-Policy— pasaron a contarse como falsos positivos en los diecisiete
-# objetivos HTTP del catálogo y tumbaron la precisión de la Fase R a 0,557
-# (#455). Ver ``_security_headers.py`` para la derivación y su única excepción.
+# objetivos HTTP del catálogo y tumbaron la precisión del banco a 0,557.
+# Ver ``_security_headers.py`` para la derivación y su única excepción.
 _HEADERS = always_missing_header_checks()
 
 
@@ -126,7 +126,7 @@ def _tls_serve(files: dict) -> str:
 # hallazgo. Manda la familia **entera** de cabeceras, no sólo las tres con
 # las que se escribió: en cuanto el feed creció, un «endurecido» al que le
 # faltaban tres cabeceras dejó de ser un control negativo y pasó a aportar
-# tres falsos positivos él solo (#455).
+# tres falsos positivos él solo.
 _HARDENED_CONF = (
     "printf '%s' 'server { listen 80; "
     'add_header Strict-Transport-Security "max-age=31536000" always; '
@@ -175,15 +175,15 @@ _REAL_EXPOSURES = {
 # Un volcado de base de datos expuesto dispara **dos** checks del feed, no uno.
 # ``sql-backup-exposure`` (CRITICAL) pide /backup.sql con un cuerpo que contenga
 # INSERT INTO o CREATE TABLE; ``sql-dump-exposure`` (HIGH), añadido cuando el
-# feed creció (#296), pide una lista de nombres en la que /backup.sql también
+# feed creció, pide una lista de nombres en la que /backup.sql también
 # está. El mismo fichero satisface a los dos.
 #
 # El catálogo los etiqueta como pareja porque, tal y como está hoy el feed, los
 # dos hallazgos son ciertos: contarlos como uno solo haría del segundo un falso
 # positivo que no lo es. Pero el solapamiento **sí es un defecto del feed**, no
 # del banco —en producción produce dos hallazgos con severidades distintas para
-# el mismo fichero— y se sigue en #456. Cuando ahí se decida deduplicarlos, esta
-# pareja vuelve a ser un solo identificador.
+# el mismo fichero— y sigue sin resolverse en el feed. El día que se
+# deduplique, esta pareja vuelve a ser un solo identificador.
 _SQL_DUMP_CHECKS = {
     "lybra:sql-backup-exposure@1",
     "lybra:sql-dump-exposure@1",
@@ -347,7 +347,7 @@ _CATALOGUE = (
         # Las mismas siete rutas, pero servidas por HTTPS. Hasta ahora ningún
         # check de ``exposed_path`` se ejercitaba nunca sobre TLS, que es como
         # sirve la mayoría de los sitios reales — y es justo el camino donde la
-        # detección de esquema por observación (#268) decide si la sonda habla
+        # detección de esquema por observación decide si la sonda habla
         # en claro o cifrado.
         command=_tls_serve(_REAL_EXPOSURES),
         expected=_HEADERS | _ALL_EXPOSURE_CHECKS | {"lybra:tls-self-signed-cert@1"},
@@ -445,7 +445,7 @@ def _wait_until_serving(port: int, tls: bool, label: str = "", timeout: float = 
     sonda TLS, nginx ya estaba en pie y el check de certificado sí funcionaba.
     El banco reportaba tres falsos negativos por objetivo TLS y ningún fallo.
 
-    Es la tercera vez que esta carrera muerde en este paquete (#265, L49), y
+    Es la tercera vez que esta carrera muerde en este paquete, y
     siempre con la misma cara: se lee como "el motor no detectó".
 
     La comprobación es deliberadamente **cruda** —un socket y una línea de
@@ -499,7 +499,7 @@ def _running(target: Target) -> Iterator[int]:
     # Un contenedor que muere al arrancar —una configuración de nginx que no
     # parsea, sin ir más lejos— produce cero hallazgos, y cero hallazgos es
     # indistinguible de "el motor no detectó nada" en el agregado. Registrarlo
-    # es lo que hace que el log diga cuál de las dos cosas pasó (#455).
+    # es lo que hace que el log diga cuál de las dos cosas pasó.
     remember_container(port, name)
     try:
         wait_for_port("127.0.0.1", port, docker_path=_DOCKER)
@@ -514,7 +514,7 @@ def _measured_check_ids(findings) -> Set[str]:
 
     Los de estado ``fixed`` se excluyen, y no es un detalle: los nueve objetivos
     del catálogo comparten IP (127.0.0.1) y por tanto el mismo ``Host``, así que
-    ``apply_lifecycle`` (Fase 5) arrastra a cada escaneo un hallazgo fantasma por
+    ``apply_lifecycle`` arrastra a cada escaneo un hallazgo fantasma por
     cada uno del escaneo anterior que ya no está, precisamente para dejar
     constancia de la remediación. Contarlos como detecciones convertiría el
     ciclo de vida —que funciona— en seis falsos positivos inventados por el
@@ -527,7 +527,7 @@ def _measured_check_ids(findings) -> Set[str]:
 
 
 def test_fase_r_precision_over_labelled_catalogue(app, admin_user, monkeypatch):
-    """El número de la Fase R: precisión ≥ 0,9 sobre el catálogo etiquetado."""
+    """El umbral de este banco: precisión ≥ 0,9 sobre el catálogo etiquetado."""
     true_positives = false_positives = false_negatives = 0
     breakdown = []
 
@@ -556,7 +556,7 @@ def test_fase_r_precision_over_labelled_catalogue(app, admin_user, monkeypatch):
     recall = true_positives / (true_positives + false_negatives) if true_positives + false_negatives else 0.0
 
     report = (
-        "\n[precisión Fase R] catálogo de "
+        "\n[precisión] catálogo de "
         f"{len(_CATALOGUE)} objetivos etiquetados, familias {sorted(_MEASURED_CATEGORIES)}\n"
         + "\n".join(breakdown)
         + f"\n  TOTAL  TP={true_positives} FP={false_positives} FN={false_negatives}"
@@ -567,7 +567,7 @@ def test_fase_r_precision_over_labelled_catalogue(app, admin_user, monkeypatch):
 
     assert precision >= _PRECISION_THRESHOLD, report
 
-    # Y, por encima del umbral del roadmap, un guardarraíl contra la deriva.
+    # Y, por encima del umbral exigido, un guardarraíl contra la deriva.
     #
     # El 0,9 se fijó cuando el banco tenía 30 detecciones. Con 68 hacen falta
     # más de siete falsos positivos para bajar de ahí, así que una regresión

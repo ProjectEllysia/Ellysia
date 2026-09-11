@@ -1,0 +1,37 @@
+{# Aviso de que una conexión de buzón de Iris necesita reautorización.
+   Contexto: account_email, recipient_name (opcional). #}
+{% extends "base.html.j2" %}
+{% from "_macros.html.j2" import data_row %}
+
+{% block title %}Reconecta tu buzón: {{ account_email }}{% endblock %}
+
+{% block preheader %}Iris necesita que reconectes {{ account_email }} para seguir vigilándolo.{% endblock %}
+
+{% block header_tagline %}
+<div style="margin-top:8px; font-family:Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#8a857c;">
+  Iris — Buzones conectados
+</div>
+{% endblock %}
+
+{% block content %}
+<p style="margin:0 0 16px;">{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}</p>
+
+<p style="margin:0 0 20px;"><strong>Necesitamos que reconectes tu buzón.</strong></p>
+
+<p style="margin:0 0 20px;">El proveedor de correo ha revocado o dejado caducar el acceso que le diste a Iris
+para vigilar este buzón, así que hemos dejado de sondearlo hasta que lo reconectes.</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 20px; background-color:#faf8f5; border-left:3px solid #c0392b; border-radius:0 6px 6px 0;">
+  <tr>
+    <td style="padding:16px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        {{ data_row("Cuenta", account_email) }}
+      </table>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:0;">Mientras tanto, ningún correo nuevo de esta cuenta se está analizando. Puedes
+reconectarla desde tu panel de Iris.</p>
+{% endblock %}

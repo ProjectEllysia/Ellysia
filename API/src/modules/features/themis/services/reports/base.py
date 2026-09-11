@@ -4,8 +4,6 @@
 Cada tipo de escaneo se da de alta con ``@PrintingStrategy.register(...)``
 junto a su propia clase; ``resolve_printing_strategy`` despacha por ese
 registro, así que añadir un tipo nuevo no toca este fichero.
-
-D5 en ``plans/deuda-tecnica-y-calidad.md``.
 """
 
 import logging

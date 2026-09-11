@@ -60,7 +60,7 @@ class MonitoredAssetRepository(BaseRepository[MonitoredAsset]):
         return self.get_by_field("agent_key_id", agent_key_id)
 
     def count_by_user(self, user_id: int) -> int:
-        """Cuenta cuántos activos tiene ya dados de alta un usuario (cuota §16.4)."""
+        """Cuenta cuántos activos tiene ya dados de alta un usuario (para la cuota)."""
         return (
             self._session.query(MonitoredAsset)
             .filter(MonitoredAsset.user_id == user_id)
@@ -263,8 +263,8 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
     ) -> List[tuple]:
         """Instantes y vatios de un activo en una ventana, para el cálculo de energía.
 
-        A diferencia de ``get_series``, no aplica ``limit``: el cálculo de la
-        Fase 3 (media ponderada por duración, P21) necesita **todos** los
+        A diferencia de ``get_series``, no aplica ``limit``: la media ponderada
+        por duración del consumo eléctrico necesita **todos** los
         intervalos de la ventana para no subestimar el tiempo observado, y
         una ventana de 30 días a 15 s de cadencia son ~172.000 filas —
         demasiado para el tope de la serie gráfica (1.000 puntos), pero
@@ -273,8 +273,8 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
 
         Los snapshots sin lectura de potencia (``power_watts IS NULL``, sea
         porque el agente no tiene fuente compatible o porque son anteriores
-        a P16) se excluyen: para el cálculo de energía equivalen a un hueco,
-        no a un cero.
+        a que el agente reportase potencia) se excluyen: para el cálculo de
+        energía equivalen a un hueco, no a un cero.
 
         Returns:
             Lista de ``(received_at, power_watts)`` ordenada de más antiguo
@@ -308,7 +308,7 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
         )
 
     def delete_older_than(self, cutoff: datetime) -> int:
-        """Elimina snapshots anteriores a ``cutoff`` (job de retención, §7.3).
+        """Elimina snapshots anteriores a ``cutoff`` (job de retención).
 
         Poda por ``received_at``, el mismo eje que ordena la serie: con
         ``collected_at`` las filas de un agente con el reloj adelantado

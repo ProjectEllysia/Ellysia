@@ -215,19 +215,24 @@ todavía no está confirmada, o peor, notificar un cambio que después se revier
 posterior en la misma petición. Sería un webhook que anuncia algo que nunca pasó, y no hay forma de
 retractarlo.
 
-El repo ya se topó con esto y lo resolvió a mano: `HygeiaNotifyManager.enqueue_for()` documenta que
-*"debe llamarse siempre después de que la transacción que las creó ya sea durable"*. Esa disciplina
-manual funciona para un caso; para un mecanismo genérico que van a usar todos los módulos, hay que
-hacerla estructural. Dos opciones:
+El repo ya dejó de resolver esto a mano: `system/taskqueue/outbox.py` y `OutboxDispatcher`
+(`system/taskqueue/dispatcher.py`) son un outbox transaccional genérico, ya en uso por
+`IrisStuckSyncNotifyManager`, `IrisReauthNotifyManager` y `HygeiaNotifyManager` — cada uno escribe
+su fila `TaskDispatch` en la misma transacción que el estado que la dispara, fuerza el commit con
+`UnitOfWork.commit_for_handoff()`, y solo entonces llama a `OutboxDispatcher.dispatch()` fuera del
+bloque; un barrido (`dispatch_pending()`) reintenta lo que quedó sin publicar tras una caída. Esto
+cambia el balance de las dos opciones de abajo: la (b) ya no añade una tabla ni un poller nuevos —
+ambos existen — así que su coste frente a la (a) es solo el de escribir una fila más por evento.
 
 - **(a) Buffer + flush en el borde** — `publish()` acumula en un buffer de contexto (`g` en request,
   el `job_context` en background) y el flush se engancha *después* del commit, en los mismos dos
-  bordes que ya gestionan la sesión. Barato, encaja como un guante con la arquitectura existente.
-  **Recomendada para la v1.**
-- **(b) Outbox transaccional** — el evento se escribe como fila en la *misma* transacción, y un
-  worker aparte la lee y entrega. Es la solución correcta al 100 % (sobrevive a una caída entre el
-  commit y el encolado), pero añade una tabla, un poller y latencia. **Guardarla para cuando alguien
-  pague por "entrega garantizada"**, no para la v1.
+  bordes que ya gestionan la sesión. Más barato en el caso feliz, pero no sobrevive a una caída del
+  proceso API entre el commit y el flush: ese evento se pierde sin dejar rastro.
+- **(b) Outbox transaccional** — reutilizar `TaskDispatch`/`OutboxDispatcher` tal cual, con una
+  categoría de tarea propia (`echo.deliver`) para el payload del webhook. Sobrevive a una caída en
+  cualquier punto, y el mecanismo ya está construido y probado; el coste añadido sobre (a) es una
+  fila de outbox por evento, no una pieza nueva de infraestructura. **Con esto ya construido, es la
+  opción por defecto salvo que el volumen de eventos haga notar esa fila extra.**
 
 La diferencia práctica entre (a) y (b) es una ventana de milisegundos en la que un crash del proceso
 API pierde el evento. Para avisos operativos es asumible; para facturación no lo sería. Ellysia está

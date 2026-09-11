@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+from unittest import mock
 
 import pytest
+from reportlab.lib.styles import getSampleStyleSheet
 
-from src.modules.features.iris.services.reports import IrisPDFCreator
+import src.modules.features.iris.services.reports as reports_mod
+import src.modules.system.config_reading as CR
+from src.modules.features.iris.services.reports import IrisPDFCreator, IrisReportTheme, PALETTE
 
 pytestmark = pytest.mark.unit
 
@@ -57,7 +61,7 @@ def test_print_pdf_creates_a_file():
 
 
 def test_two_documents_of_the_same_analysis_do_not_collide():
-    """B11: el modelo permite N documentos por análisis, pero el nombre del
+    """El modelo permite N documentos por análisis, pero el nombre del
     fichero solo dependía del análisis, así que todos escribían el mismo PDF."""
     first = IrisPDFCreator(report=_sample_report(), document_id=1).print_pdf()
     second = IrisPDFCreator(report=_sample_report(), document_id=2).print_pdf()
@@ -157,3 +161,150 @@ def test_print_pdf_with_legitimate_verdict():
     creator = IrisPDFCreator(report=report)
     path = creator.print_pdf()
     assert os.path.exists(path)
+
+
+# ------------------------------------------------ redacción del raw dump
+
+def _theme() -> IrisReportTheme:
+    return IrisReportTheme(getSampleStyleSheet(), PALETTE)
+
+
+def _rendered_raw_headers_text(report: dict) -> str:
+    """Llama a append_raw_headers() directamente y concatena el texto de
+    cada Paragraph -- más directo que parsear el PDF resultante."""
+    creator = IrisPDFCreator(report=report)
+    elements: list = []
+    creator.append_raw_headers(elements, _theme())
+    return "\n".join(el.text for el in elements if hasattr(el, "text"))
+
+
+def test_raw_headers_dump_redacts_an_unrelated_email_by_default():
+    report = _sample_report(rawHeaders=(
+        "From: a@b.com\nTo: c@d.com\nSubject: Test\n"
+        "Cc: bystander@example.com\n"
+    ))
+    rendered = _rendered_raw_headers_text(report)
+
+    assert "bystander@example.com" not in rendered
+
+
+def test_raw_headers_dump_keeps_the_surfaced_addresses():
+    report = _sample_report(rawHeaders="From: a@b.com\nTo: c@d.com\nSubject: Test\n")
+    rendered = _rendered_raw_headers_text(report)
+
+    assert "a@b.com" in rendered
+    assert "c@d.com" in rendered
+
+
+def test_raw_headers_dump_is_not_redacted_when_disabled_in_config():
+    report = _sample_report(rawHeaders=(
+        "From: a@b.com\nTo: c@d.com\nSubject: Test\nCc: bystander@example.com\n"
+    ))
+    with mock.patch.object(
+        reports_mod.CR, "iris_config", lambda: CR.IrisConfig(redact_pii_in_reports=False),
+    ):
+        rendered = _rendered_raw_headers_text(report)
+
+    assert "bystander@example.com" in rendered
+
+
+# ------------------------------------------------ contexto ganador de un reenvío
+
+def _rendered_preview_text(report: dict) -> str:
+    """Llama a append_email_preview() y concatena el texto de los Paragraph,
+    tanto sueltos como dentro de las celdas de la tabla de vista previa."""
+    creator = IrisPDFCreator(report=report)
+    elements: list = []
+    creator.append_email_preview(elements, _theme())
+    texts = []
+    for element in elements:
+        if hasattr(element, "text"):
+            texts.append(element.text)
+        for row in getattr(element, "_cellvalues", []):
+            for cell in row:
+                texts.append(cell.text if hasattr(cell, "text") else str(cell))
+    return "\n".join(texts)
+
+
+def test_preview_uses_the_winning_context_headers_over_the_raw():
+    """La vista previa describe el mensaje que produjo el veredicto, aunque
+    el raw empiece por las cabeceras de otro."""
+    report = _sample_report(
+        rawHeaders="From: original@corp.example\nSubject: Original\n",
+        previewHeaders={"subject": "FW: revisa esto", "from": "alerta@evil.example",
+                        "to": None, "replyTo": None, "returnPath": None, "date": None},
+    )
+    text = _rendered_preview_text(report)
+    assert "alerta@evil.example" in text
+    assert "FW: revisa esto" in text
+    assert "original@corp.example" not in text
+
+
+def test_preview_note_says_the_wrapper_won_and_summarises_the_original():
+    report = _sample_report(
+        unwrappedFromForward=True, wrapperFrom="alerta@evil.example",
+        winningContext="wrapper",
+        winningReason="El envoltorio del reenvío (Phishing) es más grave.",
+        secondaryContext={"contextType": "inner", "verdict": "Legitimate", "totalScore": 100.0},
+    )
+    text = _rendered_preview_text(report)
+    assert "envoltorio del reenvío" in text
+    assert "El otro mensaje (original) obtuvo Legitimate" in text
+
+
+def test_preview_note_says_the_original_won_by_default():
+    report = _sample_report(unwrappedFromForward=True, wrapperFrom="colega@corp.example")
+    text = _rendered_preview_text(report)
+    assert "correo original reenviado" in text
+
+
+# ------------------------------------------------ confianza y cobertura
+
+def _rendered_confidence_text(report: dict) -> str:
+    creator = IrisPDFCreator(report=report)
+    elements: list = []
+    creator.append_confidence(elements, _theme())
+    texts = []
+    for element in elements:
+        for row in getattr(element, "_cellvalues", []):
+            texts.extend(cell.text for cell in row if hasattr(cell, "text"))
+    return "\n".join(texts)
+
+
+def test_confidence_card_shows_level_coverage_and_reasons_without_a_percentage():
+    report = _sample_report(
+        confidence="low",
+        coverage={"mode": "headers_only", "uncoveredRules": ["Body Links", "Body Content"]},
+        uncertaintyReasons=["Solo se analizaron las cabeceras."],
+    )
+    text = _rendered_confidence_text(report)
+    assert "Confianza del análisis: Baja" in text
+    assert "no una probabilidad" in text
+    assert "solo cabeceras" in text
+    assert "Body Links, Body Content" in text
+    assert "Solo se analizaron las cabeceras." in text
+    assert "%" not in text
+
+
+def test_confidence_card_is_omitted_for_reports_without_confidence():
+    assert _rendered_confidence_text(_sample_report()) == ""
+
+
+# ------------------------------------------------ evidencia anclada
+
+def test_finding_detail_shows_the_defanged_evidence_and_the_unanchorable_reason():
+    report = _sample_report(rules=[
+        {"ruleName": "Body Links", "category": "content_analysis", "score": -25, "verdict": "fail",
+         "details": {}, "recommendation": "No hagas clic.",
+         "evidence": [{"kind": "url", "locator": {"linkIndex": 0},
+                       "excerpt": "hxxp://192.168.10.20/login"}]},
+        {"ruleName": "Body Content", "category": "content_analysis", "score": -10, "verdict": "fail",
+         "details": {}, "recommendation": "Cuidado.",
+         "evidence": [], "evidenceUnavailableReason": "La regla evalúa el cuerpo en conjunto."},
+    ])
+    creator = IrisPDFCreator(report=report)
+    elements: list = []
+    creator.append_rules(elements, _theme())
+    text = "\n".join(element.text for element in elements if hasattr(element, "text"))
+    assert "hxxp://192.168.10.20/login" in text
+    assert "Sin evidencia anclada: La regla evalúa el cuerpo en conjunto." in text

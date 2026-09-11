@@ -50,7 +50,7 @@ class NmapAIWriter:
         _generator: scribe AIGenerator used for model calling.
     """
 
-    # Tope de puertos detallados que viajan al prompt (#118): un host con
+    # Tope de puertos detallados que viajan al prompt: un host con
     # cientos de puertos abiertos (mala configuración, o un rango escaneado
     # como si fuera un solo host) podía generar un 'ports_json' sin límite.
     # '{{total_ports}}' sigue reportando el recuento real (no el recortado),
@@ -527,12 +527,12 @@ class LybraAIWriter:
     # completo (confirmados + KEV + cola), no solo a la cola: un scan con más
     # de _MAX_HIGHLIGHTED_FINDINGS hallazgos confirmados/KEV podía generar un
     # payload sin límite real pese a este tope, porque antes solo recortaba
-    # "rest" (Issue #118). El rollup por servicio cubre igualmente los que no
+    # "rest". El rollup por servicio cubre igualmente los que no
     # entran, así que un host con cientos de CVEs sigue describiéndose entero.
     _MAX_HIGHLIGHTED_FINDINGS = 25
     _MAX_DESCRIPTION_CHARS = 300
 
-    # Tope de grupos del rollup por servicio (#118): un objetivo con muchos
+    # Tope de grupos del rollup por servicio: un objetivo con muchos
     # productos/puertos distintos (un rango de red, no un solo host) podía
     # generar un 'services_json' sin límite pese a que ya es una compresión
     # de los hallazgos. Ordenado por severidad (ver _build_service_rollup),
@@ -553,7 +553,7 @@ class LybraAIWriter:
                 (``"lybra"``, ``"nuclei"``...). The writer's logic is generic
                 over the source — it only reads already-structured ``Finding``
                 rows (``cve_ids``, ``cvss``, ``epss``, ``confirmed``...) — so a
-                second tool with the same shape (Nuclei, Fase U1) reuses this
+                second tool with the same shape (Nuclei) reuses this
                 class instead of duplicating it, distinguished only by which
                 prompt pair it reads.
         """
@@ -611,7 +611,7 @@ class LybraAIWriter:
         # repositorio) para que, al recortar, sobrevivan los más graves —
         # y se recortan igual que la cola: antes solo _rest_ tenía tope, así
         # que un scan con más de _MAX_HIGHLIGHTED_FINDINGS confirmados/KEV
-        # generaba un payload sin límite real pese a la constante (#118).
+        # generaba un payload sin límite real pese a la constante.
         priority = list({id(finding): finding for finding in findings
                           if finding.get("confirmed") or finding.get("in_kev")}.values())
         priority.sort(key=self._sort_key)

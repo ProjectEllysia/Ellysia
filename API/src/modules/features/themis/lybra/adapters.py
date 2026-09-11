@@ -14,7 +14,7 @@ ruled out because its report/chart code has no test coverage and could not
 be rewritten safely in a single pass.
 
 OpenVAS had the same adapter (``openvas_result_to_finding``) until the
-scanner was removed (roadmap §7/§6.3, Ronda 2 — E2). Its historical
+scanner was removed. Its historical
 ``Finding`` rows — ``source="openvas"``, ``check_id`` prefixed
 ``"openvas:"`` — are unaffected: they live in the source-agnostic Finding
 table this module writes into, not in anything this file owns.
@@ -117,7 +117,7 @@ def nuclei_result_to_finding(result: dict, feed_version: str = "nuclei-templates
     Nuclei's output maps almost 1:1 onto ``Finding`` — unlike Nikto's
     ``osvdb_id``, a matched template can carry a real CVE, CVSS and EPSS score
     straight from its ``info.classification`` block. That is what lets a Nuclei
-    scan enter the multi-source deduplication (Fase 5) for free.
+    scan enter the multi-source deduplication for free.
 
     Args:
         result: One decoded JSONL line, as produced by ``NucleiResultProcessor``.
@@ -210,7 +210,7 @@ def _stable_hash(*parts: str) -> str:
 
 
 def finding_to_json(f: dict, exposure: str) -> dict:
-    """Serialize one ``Finding`` snapshot dict to the API JSON shape (A5).
+    """Serialize one ``Finding`` snapshot dict to the API JSON shape.
 
     Shared by ``LybraEngineManager.format_scan`` and
     ``NucleiScanManager.format_scan`` — both hand-wrote the same fifteen-key

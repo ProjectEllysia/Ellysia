@@ -1,7 +1,8 @@
 # La Guía del Proyecto — Ellysia
 
 Documento maestro del repositorio. Es la **única** fuente de verdad operativa y arquitectónica:
-`AGENTS.md` apunta aquí, y `README.md` cubre solo la superficie pública (referencia de endpoints).
+`AGENTS.md` apunta aquí, `README.md` cubre solo la superficie pública (referencia de endpoints) y
+`CONVENCIONES.md` fija dónde y cómo se crea cada pieza de código.
 Si algo de aquí contradice a un documento de `plans/`, manda el código; `plans/` describe
 intenciones y auditorías fechadas, no el estado actual.
 
@@ -147,6 +148,9 @@ schemas.py        # schemas Marshmallow — las claves JSON son camelCase
 services/         # helpers internos del módulo (escáneres, parsers, scheduling, informes)
 ```
 
+Qué entidad le toca a cada pieza, qué puede importar a qué y dónde van los helpers compartidos:
+[`CONVENCIONES.md`](CONVENCIONES.md) §3–§6.
+
 Cuando `managers.py` se hace grande pasa a ser **paquete** `managers/` con un `__init__.py` que
 reexporta la superficie pública (así ningún import externo cambia). Estado actual:
 
@@ -172,6 +176,15 @@ Lo mismo con `themis/services/reports/`, que es paquete (`base.py`, `creator.py`
   sesiones fuera de los repositorios.
 - **`shared/`** — modelo base, excepciones, `handle_exceptions`, rate limiter, `Document` base,
   `DocumentManager`, `assert_owned`, cripto, white-label.
+  **Cifrado en reposo: siempre `EncryptedText`, nunca a mano.** Un secreto que la aplicación
+  necesite poder leer se declara como `Column(EncryptedText(purpose="..."), ...)` y punto; en
+  Python se lee y se escribe en claro, y lo cifrado es la fila. Llamar a `encrypt_at_rest`/
+  `decrypt_at_rest` desde un manager es el patrón viejo: convivieron los dos y quien añadía un
+  campo sensible no tenía forma de saber cuál imitar. `tests/unit/test_shared_crypto.py` ata las
+  dos mitades — qué columnas están cifradas y con qué `purpose`, y que no reaparezca ninguna
+  llamada manual en `src/`. Cada `purpose` tiene su clave (`<PURPOSE>_ENCRYPTION_KEY` en `.env`).
+  Como el descifrado pasa a ocurrir al cargar la fila, los secretos que la mayoría de las
+  consultas no miran se declaran además `deferred`.
 - **`tools/scribe/`** — capa de estrategias enchufables de **generación IA** (Ollama / OpenAI /
   Google). El consumidor le pasa entradas; scribe no sabe nada de ellas. Estrategia elegida por
   módulo en `SecOpsConfig.json` → `tools.scribe.modules`.
@@ -184,18 +197,21 @@ por cadenas de `if/elif`.
 ### TaskQueue (RQ + Redis) — `system/taskqueue/`
 
 Sustituye a la cola en proceso legada. Los jobs persisten en Redis (sobreviven a reinicios de la
-API) y corren en **procesos worker aislados del SO**, no en hilos.
+API) y corren en un **proceso worker separado de la API**; dentro de él, cada job ocupa uno de
+los `max_workers` hilos (`SimpleWorker` de RQ, sin `fork` — `worker.py` explica por qué).
 
 Ficheros clave: `task.py` (dataclass `Task` + enum `TaskStatus`), `queue.py` (singleton `TaskQueue`
 con backend RQ+Redis), `worker.py` (entrada del worker), `tracking.py` (`TaskTrackingMixin`).
 
 - Enviar: `TaskQueue.get_instance().submit(func, name=, category=, external_id=, args=, timeout=)`.
 - Los puntos de entrada son `@staticmethod` en el manager de cada módulo (p. ej.
-  `NmapScanManager.execute_nmap_scan`) — picklables por referencia, sin estado ligado; instancian
-  un manager fresco dentro del worker (patrón `execute_*` como costura → cuerpo en `_run_*`).
+  `NmapScanManager.execute_nmap_scan`) — picklables por referencia, sin estado ligado; delegan en
+  el cuerpo del job (patrón `execute_*` como costura → cuerpo en la función de módulo `_run_*`).
+  Cuándo encolar por la outbox (`build_dispatch` + `OutboxDispatcher`) y cuándo con `submit()`
+  directo, y la receta completa: [`CONVENCIONES.md`](CONVENCIONES.md) §7.
 - **Categorías**: `themis.scan`, `themis.report`, `themis.traceroute`, `aegis.generate`,
-  `aegis.campaign`, `iris.analyze`, `iris.report`, `iris.ingest`, `iris.notify`, `hygeia.notify`
-  (+ `default`). Cada módulo las da de alta en su `__init__.py` con `QueueRegistry.register(...)`;
+  `aegis.campaign`, `iris.analyze`, `iris.ai_summary`, `iris.report`, `iris.ingest`,
+  `iris.notify`, `hygeia.notify` (+ `default`). Cada módulo las da de alta en su `__init__.py` con `QueueRegistry.register(...)`;
   los workers escuchan en colas por categoría.
 - **`external_id`**: el prefijo lo declara el manager en `EXTERNAL_ID_PREFIX` (`scan:`,
   `themis-doc:`, `themis-traceroute:`, `aegis-doc:`, `aegis-campaign:`, `iris-analysis:`,
@@ -344,18 +360,79 @@ que actualizarla en tres sitios — la ruta del `@config_block` (o la llamada a 
 
 ---
 
-## Convenciones de nombres
+## Convenciones de código
 
-- **Palabras completas**, nunca abreviaturas ni letras sueltas: `message` no `msg`, `count` no
-  `cnt`, `manager` no `mgr`, `document` no `doc`, `task_queue` no `tq`.
-  Excepciones autorizadas: `repo`, `config`, `uow`, `pk`, `CR`, `e` en `except ... as e`, y
-  `_`, `i`, `j`, `n`, `x`, `y`, `ip` como índices o descartes.
-- **El nombre aclara el tipo.** `critical_threshold` no `critical` (`critical` se lee como
-  booleano; `critical_threshold` dice que es un entero).
-- **Booleanos con `is`/`are`/`was`/`did`**: `is_finished`, `was_cancelled`, `did_succeed`,
-  `was_written`, `is_verified`.
-- **Y al revés**: lo que no es booleano no debe sonar a booleano. `active_scans` (una lista) no
-  `active`; `matched_phrases` no `found`; `empty_payload` no `empty`.
+Dónde va cada pieza, qué entidad darle (repositorio, manager, servicio, scheduler, constante o
+clave de config), qué puede importar a qué y cómo se nombra todo está en
+**[`CONVENCIONES.md`](CONVENCIONES.md)**. Eso incluye la regla de nombres: palabras completas,
+funciones con verbo y booleanos con `is_`/`has_`… No se duplica aquí.
+
+---
+
+## Documentación de funciones, clases y métodos
+
+Toda función, clase o método que se genere o modifique lleva **docstring en castellano**, sin
+excepción — esto es una extensión de la regla de idioma de la cabecera de este documento, no una
+regla nueva y separada. Un docstring incompleto es peor que ninguno: promete una referencia y
+luego obliga a leer el cuerpo igualmente.
+
+Estructura obligatoria:
+
+- **Qué hace.** Una explicación clara del propósito, en prosa — no una repetición del nombre
+  (`"""Calcula el umbral crítico."""` sobre una función `calculate_critical_threshold` no dice
+  nada nuevo; explica *qué* umbral, *a partir de qué* y *por qué* hace falta).
+- **Todos los parámetros** (o, en una clase, todos los atributos), cada uno con:
+  - su propósito,
+  - qué valores acepta (tipo, y si es un conjunto cerrado — enum, `Literal`, cadena con formato
+    concreto — cuáles son los valores válidos),
+  - el valor por defecto, si lo tiene.
+- **El tipo devuelto**, y si puede tomar más de un valor con distinto significado (`None` frente a
+  una instancia, un enum con varios miembros, una tupla con estados distintos), qué significa cada
+  uno.
+
+Formato (estilo Google, adaptado al castellano):
+
+```python
+def calculate_critical_threshold(base_score: float, scan_type: ScanType, multiplier: float = 1.5) -> float:
+    """Calcula el umbral crítico de una vulnerabilidad a partir de su puntuación base.
+
+    El umbral resultante decide si un hallazgo dispara notificación inmediata
+    (ver `NotificationManager.should_notify`).
+
+    Args:
+        base_score: Puntuación CVSS base del hallazgo, en el rango [0.0, 10.0].
+        scan_type: Tipo de escaneo que originó el hallazgo (`ScanType.NMAP`,
+            `ScanType.NIKTO`, `ScanType.NUCLEI` o `ScanType.LYBRA`); determina qué
+            tabla de pesos se aplica.
+        multiplier: Factor de ajuste sobre `base_score`. Por defecto `1.5`.
+
+    Returns:
+        float: El umbral crítico ya ajustado. Nunca es negativo; si `base_score`
+            es `0.0` el resultado es `0.0`.
+    """
+```
+
+**El docstring describe lo que la función es hoy, no lo que fue.** Frases como «antes esto se
+tragaba la excepción», «hasta el cambio X devolvía una lista» o «se reescribió para…» cuentan la
+historia del cuerpo, no su contrato: obligan a quien lee a reconstruir una versión que ya no existe
+para entender la que tiene delante, y se quedan viejas en cuanto el código vuelve a cambiar. Esa
+historia ya está en el mensaje de commit y en la descripción del PR, que es donde se busca.
+
+Lo que sí cabe es el *porqué* de una decisión que hoy no es obvia, escrito en presente: «se captura
+aquí y se vuelve a lanzar porque la cola debe ver el trabajo como fallido» explica el código actual;
+«antes no se capturaba y la fila se quedaba en `running`» explica el código anterior. Si el pasado
+importa de verdad a quien usa la función —datos antiguos que siguen en la base de datos, un formato
+que se sigue aceptando por compatibilidad—, va en un bloque aparte y marcado como aviso, no mezclado
+con la descripción:
+
+```python
+    Warning:
+        Los jobs encolados antes de pasar a la outbox traen ``Service`` ya
+        construidos en vez de dicts; se aceptan los dos.
+```
+
+Esto rige para código nuevo y para funciones/clases/métodos que se toquen al pasar; no obliga a
+reescribir en masa lo que ya existe y no se está editando.
 
 ---
 
@@ -418,6 +495,18 @@ nada lo obliga a estar fresco. Dos reglas:
   feature/fix ni los repartas entre varios: haz `git add README.md` por separado y commitéalo solo
   (`docs(readme): keep in sync with ...`), aunque la sesión abarque varios commits. Si ya hay un
   commit de README en la sesión, mete ahí las actualizaciones posteriores en vez de abrir otro.
+- **Ninguna referencia a issues ni a PRs, ni en el README ni en el código.** Una frase como
+  «decisión tomada por el issue #N», «ver `plans/x.md`» o un `(#N)` al final de un docstring dice
+  *de dónde salió* una decisión, no la decisión — y un número de issue envejece peor que el código:
+  quien lo lee lo hereda para siempre aunque el issue se cierre, se renumere en otro repo o deje de
+  ser accesible. La prohibición cubre el README, los docstrings, los comentarios y los tests.
+  El *porqué* de una decisión va **en el código**, lo más cerca posible de lo que decide — un
+  comentario junto a la línea, o el docstring de la función/clase si la decisión afecta a toda su
+  lógica —, pero **explicado con sus propias palabras y sin el número**: tiene que entenderse sin
+  abrir el issue. El sitio de las referencias a issues y PRs es el mensaje de commit (`Refs #N`) y
+  la descripción del PR. Quedan referencias antiguas en el código (`# ... (#118)` en
+  `themis/services/analyzers.py`, `(Issue #118)` en `tools/scribe/inputs.py`, varias `#551`):
+  no son un patrón a imitar, y se quitan al tocar la función que las lleva.
 
 ---
 

@@ -1,0 +1,15 @@
+From: "RRHH Acme" <rrhh@acme.com>
+To: empleados@acme.com
+Return-Path: <rrhh@acme.com>
+Subject: Aviso importante sobre vacaciones
+Date: Mon, 07 Sep 2026 09:30:00 +0000
+Message-ID: <xyz789@acme.com>
+Authentication-Results: mx.acme.com; spf=pass smtp.mailfrom=acme.com; dkim=pass header.d=acme.com; dmarc=pass
+Content-Type: text/plain; charset=utf-8
+
+Estimado equipo,
+
+Les recordamos el procedimiento para solicitar vacaciones este ano. Por favor completen el formulario interno antes de fin de mes.
+
+Saludos,
+RRHH

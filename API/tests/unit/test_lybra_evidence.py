@@ -1,4 +1,4 @@
-"""La evidencia cruda de un hallazgo: redacción, truncado y hash (L44).
+"""La evidencia cruda de un hallazgo: redacción, truncado y hash.
 
 La parte pura, sin ORM ni red. La redacción es lo que separa «guardo lo que vi»
 de «me quedo con las llaves de casa del cliente», así que la mayoría de estos

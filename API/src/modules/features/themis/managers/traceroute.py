@@ -1,4 +1,4 @@
-"""TracerouteManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""Traceroutes cacheados desde el servidor de Ellysia hasta los objetivos de escaneo."""
 
 import logging
 import hashlib
@@ -92,6 +92,13 @@ class TracerouteManager(TaskTrackingMixin):
         Uses a stable job id per (user, target) so a refresh replaces any job
         still in flight instead of piling up duplicate probes. The job name must
         be RQ-safe (letters, numbers, _, -); external_id can have other chars.
+
+        Encola directo, sin la outbox transaccional que sí usan los cinco
+        escáneres: aquí no hay ninguna fila persistida antes del ``submit()``,
+        así que no existe el huérfano que la outbox previene. Un fallo de
+        encolado deja simplemente un fallo de caché — el cliente sigue
+        sondeando, no encuentra resultado fresco y la siguiente petición vuelve
+        a encolar.
         """
         key = self._trace_key(user_id, target)
         timeout = int(CR.traceroute_config().timeout) + 30

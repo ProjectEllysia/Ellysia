@@ -1,9 +1,7 @@
 """El dissector de LDAP — el servicio que más cuenta sobre una organización.
 
-LDAP estaba en la prioridad-3 de la tabla de la Fase N —*"banner y capacidades
-básicas, bajo coste cada uno, poca frecuencia"*— y esa valoración de
-**frecuencia** merecía revisarse: en una red corporativa con Active Directory,
-el 389 está abierto **siempre**.
+LDAP es bajo coste y capacidades básicas, pero no de poca frecuencia: en una
+red corporativa con Active Directory, el 389 está abierto **siempre**.
 
 Y a diferencia de casi todo lo demás, LDAP tiene una consulta estándar y
 anónima diseñada precisamente para esto: el **rootDSE**, la entrada raíz que

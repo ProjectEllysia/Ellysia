@@ -1,4 +1,4 @@
-"""Tests unitarios del adaptador inventario -> servicios de Lybra (Fase I-b).
+"""Tests unitarios del adaptador inventario -> servicios de Lybra.
 
 Pura lógica: sin DB, sin red. El caso motivador es real, no hipotético — visto
 en el primer análisis de un inventario Windows de verdad (ver el docstring de
@@ -44,7 +44,7 @@ def test_name_and_field_agreeing_is_unaffected():
 
 
 def test_falls_back_to_version_field_when_name_has_no_dotted_number():
-    # "Half-Life 2" NO es una versión (Fase I-b, normalize_product_name ya
+    # "Half-Life 2" NO es una versión (normalize_product_name ya
     # protege este caso) — la extracción debe dejarlo intacto y usar `version`.
     services = services_from_inventory([_pkg("Half-Life 2", "1.0")])
     assert services[0].product == "Half-Life 2"
@@ -130,8 +130,8 @@ def test_the_stripped_version_matches_an_nvd_range():
     Este test afirmaba también lo contrario para la versión **sin** recortar
     (``version_compare(raw, "2.39") < 0``), porque entonces era cierto: el
     comparador partía la cadena en tramos de dígitos y de letras, y el sufijo
-    de empaquetado dejaba la instalada por debajo del inicio del rango. Desde
-    #267 ya no lo es — el comparador reconoce y separa la revisión de
+    de empaquetado dejaba la instalada por debajo del inicio del rango. Ya no
+    lo es — el comparador reconoce y separa la revisión de
     distribución él mismo, así que las dos formas comparan igual. Afirmar aquí
     el fallo antiguo sería congelarlo.
 

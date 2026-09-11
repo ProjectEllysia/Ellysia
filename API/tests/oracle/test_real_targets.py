@@ -1,8 +1,8 @@
-"""La lista blanca del sello de red hace exactamente lo que dice (L48).
+"""La lista blanca del sello de red hace exactamente lo que dice.
 
 El sello ``_no_outbound_sockets`` es lo que mantiene la suite en dos minutos y
 lo que garantiza que su resultado no dependa de lo que haya al otro lado de la
-red. Desde L48 tiene una excepción: las direcciones que el operador declara en
+red. Tiene una excepción: las direcciones que el operador declara en
 ``LYBRA_REAL_TARGETS`` para el banco de paridad real.
 
 Una excepción a una defensa es justo el sitio donde conviene no fiarse de la
@@ -61,7 +61,7 @@ def test_a_target_that_does_not_resolve_does_not_sink_the_rest(monkeypatch):
 
 
 # --------------------------------------------------------------------------
-# El oráculo alcanza el objetivo correcto (L48, arreglo del banco de paridad)
+# El oráculo alcanza el objetivo correcto
 # --------------------------------------------------------------------------
 #
 # Estas dos comprueban la traducción de host que el contenedor de Nmap necesita.
@@ -79,10 +79,9 @@ def test_loopback_is_reached_through_the_docker_host():
 
 
 def test_an_external_target_is_scanned_directly():
-    """El defecto que tenía el banco de paridad real: el contenedor de Nmap
-    escaneaba ``host.docker.internal`` —la máquina Docker— en vez del objetivo
-    externo, midiendo algo que no tenía nada que ver. Un host o IP que no es
-    loopback se pasa tal cual."""
+    """El contenedor de Nmap tiene que escanear el objetivo externo declarado,
+    no ``host.docker.internal`` —la máquina Docker—, que mediría algo que no
+    tiene nada que ver. Un host o IP que no es loopback se pasa tal cual."""
     assert _target_from_container("emesa.com") == "emesa.com"
     assert _target_from_container("203.0.113.9") == "203.0.113.9"
 
@@ -90,7 +89,7 @@ def test_an_external_target_is_scanned_directly():
 def test_the_oracle_container_is_told_how_to_reach_the_host():
     """Traducir el objetivo a ``host.docker.internal`` no sirve de nada si el
     contenedor no sabe resolver ese nombre, que es lo que pasa en Docker sobre
-    Linux — y por tanto en el runner del banco nocturno (#455). La bandera que
+    Linux — y por tanto en el runner del banco nocturno. La bandera que
     lo mapea contra la puerta de enlace del host tiene que ir en el ``docker
     run``, y antes de la imagen: lo que va después son argumentos de Nmap."""
     arguments = _docker_args("/usr/bin/docker")
@@ -117,13 +116,14 @@ def test_a_closed_port_is_a_measurement_and_not_an_error():
 
 
 def test_an_unreachable_target_stops_the_bench_instead_of_scoring_zero():
-    """El fallo que estuvo tres noches disfrazado de desacuerdo de fingerprint.
+    """Un objetivo que no resuelve tiene que interrumpir el banco, no colarse
+    como un desacuerdo de fingerprint más.
 
     Cuando el nombre no resuelve, Nmap emite este XML —válido, sin ni un
-    ``<host>`` dentro— y sale con código 0. Antes eso se colaba como «Nmap no
-    identificó el servicio» y restaba en la cifra de concordancia; ahora lanza,
-    y el mensaje lleva la salida de error de Nmap para que el log de CI diga
-    por sí solo qué pasó."""
+    ``<host>`` dentro— y sale con código 0. Sin esta comprobación eso se leería
+    como «Nmap no identificó el servicio» y restaría en la cifra de
+    concordancia; en vez de eso, lanza, y el mensaje lleva la salida de error de
+    Nmap para que el log de CI diga por sí solo qué pasó."""
     with pytest.raises(RuntimeError) as failure:
         assert_target_was_scanned(
             _XML_WITHOUT_A_HOST,
@@ -136,7 +136,7 @@ def test_an_unreachable_target_stops_the_bench_instead_of_scoring_zero():
 
 
 # --------------------------------------------------------------------------
-# Un contenedor caído no puede leerse como un fallo del motor (#455)
+# Un contenedor caído no puede leerse como un fallo del motor
 # --------------------------------------------------------------------------
 #
 # Puras también: sólo comprueban qué hace el registro cuando no sabe nada del
@@ -175,7 +175,7 @@ def _forget_container(port: int) -> None:
 
 
 # --------------------------------------------------------------------------
-# La familia de cabeceras del banco no puede quedarse atrás del feed (#455)
+# La familia de cabeceras del banco no puede quedarse atrás del feed
 # --------------------------------------------------------------------------
 #
 # Éste es el test que faltaba. Los bancos que miden la familia necesitan Docker
@@ -246,11 +246,11 @@ def test_a_hung_docker_daemon_is_reported_as_unavailable(monkeypatch):
     al pipe hasta que alguien lo mata: el binario existe y responde, pero no hay
     demonio detrás.
 
-    Antes eso subía como ``TimeoutExpired`` desde ``resolve_docker()``, que se
-    llama al **importar** cada módulo del banco. Como los marcadores de pytest
-    se filtran después de importar, un Docker colgado producía cinco errores de
-    colección y tumbaba la suite entera — incluso con ``-m "not oracle"``, en
-    tests que ni siquiera iban a ejecutarse.
+    Sin esta comprobación, ``resolve_docker()`` propagaría ``TimeoutExpired``
+    —se llama al **importar** cada módulo del banco—, y como los marcadores de
+    pytest se filtran después de importar, un Docker colgado produciría cinco
+    errores de colección y tumbaría la suite entera — incluso con
+    ``-m "not oracle"``, en tests que ni siquiera iban a ejecutarse.
     """
     def _hangs(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd="docker version", timeout=10)

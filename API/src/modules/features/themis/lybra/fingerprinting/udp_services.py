@@ -1,9 +1,9 @@
-"""Los consumidores de la superficie UDP — un dissector por sonda (L22).
+"""Los consumidores de la superficie UDP — un dissector por sonda.
 
-La tabla de sondas UDP creció de una fila a siete, y la regla que la gobierna
-desde la Ronda 1 es que **cada fila llega con su consumidor**, nunca la sonda
-sola: un payload sin nadie que lea la respuesta sólo produce un ``open_port``
-informativo a cambio de construir y validar una consulta más.
+La regla que gobierna la tabla de sondas UDP es que **cada fila llega con su
+consumidor**, nunca la sonda sola: un payload sin nadie que lea la respuesta
+sólo produce un ``open_port`` informativo a cambio de construir y validar una
+consulta más.
 
 Este módulo es esa mitad. Los payloads viven en :mod:`~..udp_payloads`, por la
 misma razón de siempre — ``transport.py`` los necesita para la tabla de

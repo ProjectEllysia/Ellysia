@@ -1,4 +1,4 @@
-"""Unit tests for the Scribe payload-size guardrail (Issue #118).
+"""Unit tests for the Scribe payload-size guardrail.
 
 Covers the heuristic token estimate (``estimate_tokens`` / ``AIInput.estimated_tokens``)
 and ``AIGenerator``'s pre-flight check: an oversized prompt must be rejected

@@ -1,8 +1,8 @@
-"""Unit tests for the Lybra engine (Fase 0) and the Nmap CPE capture refactor.
+"""Unit tests for the Lybra engine and the Nmap CPE capture refactor.
 
-Pure logic: no DB, no network. Verifies the two things Fase 0 introduces below
-the manager — the engine turning services into informational findings, and Nmap's
-``<cpe>`` surviving the parser all the way into ``ports_data``.
+Pure logic: no DB, no network. Verifies two things below the manager — the
+engine turning services into informational findings, and Nmap's ``<cpe>``
+surviving the parser all the way into ``ports_data``.
 """
 
 import types
@@ -61,11 +61,11 @@ def test_service_label_falls_back_when_product_missing():
     assert Service(port=1, protocol="tcp").label == "servicio desconocido"
 
 
-# ----------------------------------------------------- Nmap CPE capture (§2.1)
+# ----------------------------------------------------- Nmap CPE capture
 #
 # El procesador de Nmap sigue capturando el CPE de cada servicio: es de Nmap y
-# alimenta a Nmap. Lo que se retiró en L52 fue el puente por el que ese dato
-# entraba en un escaneo de Lybra.
+# alimenta a Nmap. No hay puente por el que ese dato entre en un escaneo de
+# Lybra: los dos motores son independientes.
 
 _NMAP_XML = """<?xml version="1.0"?>
 <nmaprun args="nmap -sV 10.0.0.5" version="7.94">
@@ -100,7 +100,7 @@ def test_nmap_processor_keeps_cpe_in_ports_data():
     assert by_proto["22/tcp"]["cpe"] == ""
 
 
-# ------------------------------------------------ version matcher (Fase 1)
+# ------------------------------------------------ version matcher
 
 def _fake_cve(cve_id="CVE-2021-41773", required_os=None):
     return types.SimpleNamespace(
@@ -119,7 +119,7 @@ def _lookup_for(expected_vendor_product, calls=None):
 
 
 def test_no_cve_lookup_means_informational_only():
-    # Fase 0 behaviour preserved when no lookup is wired.
+    # Behaviour when no lookup is wired: findings stay informational.
     engine = LybraEngine()
     findings = engine.analyze([Service(80, "tcp", "http", "Apache httpd", "2.4.49",
                                        "cpe:/a:apache:http_server:2.4.49")])
@@ -155,7 +155,7 @@ def test_version_finding_from_nmap_cpe():
 
 
 def test_version_finding_carries_required_os_from_the_cve_lookup():
-    """#118: a cve_lookup result flagged with a platform gate (KbRepository's
+    """A cve_lookup result flagged with a platform gate (KbRepository's
     transient CveEntry.required_os) must reach the finding dict, so
     score_finding can avoid crowning an unverifiable platform hypothesis as
     CRITICAL."""
@@ -201,7 +201,7 @@ def test_no_version_finding_without_a_concrete_version():
     assert [f["category"] for f in findings] == ["open_port"]
 
 
-# --------------------------------- Fase I-b: the automated CPE index (paso 2)
+# --------------------------------- the automated CPE index
 
 def test_version_finding_via_product_alias_lookup_when_override_misses():
     """The third strategy: a product the curated table has never heard of,
@@ -277,7 +277,7 @@ def test_embedded_version_in_the_product_name_still_resolves():
     assert findings[1]["category"] == "outdated_software"
 
 
-# ----------------------------------------------- Fase 0.9: external payload
+# ----------------------------------------------- external payload
 
 def test_version_finding_from_inventory_origin_is_confirmed_with_high_qod():
     # A service read straight off a package manager (Service.origin=="inventory")
@@ -295,7 +295,7 @@ def test_version_finding_from_inventory_origin_is_confirmed_with_high_qod():
     assert vuln["confirmed"] is True
 
 
-# ------------------------------------------- marca de reproducibilidad (#270)
+# -------------------------------------------------- marca de reproducibilidad
 #
 # Cada hallazgo lleva una marca que dice contra qué se resolvió. Para los checks
 # activos era cierta (sube cada vez que cambia el feed); para la detección por
@@ -369,12 +369,12 @@ def test_the_mark_fits_in_the_column_that_stores_it():
 
 
 def test_an_inventory_package_resolves_the_same_cves_as_its_upstream_version():
-    """El criterio de cierre de #267, extremo a extremo dentro del motor.
+    """El comparador de versiones de distribución, extremo a extremo en el motor.
 
     El inventario de un agente entrega versiones de paquete de distribución
     (`1:7.4-1ubuntu1`), y NVD sólo publica rangos sobre versiones de
     fabricante (`7.4`). Si el paquete no cae en los mismos rangos que su
-    versión upstream, la Fase I entera —el sustituto del escaneo autenticado—
+    versión upstream, todo el sustituto del escaneo autenticado por inventario
     mide otra cosa.
 
     La búsqueda que se inyecta aquí usa `version_in_range` de verdad, no una
@@ -421,7 +421,7 @@ def test_a_plain_vendor_version_gets_no_normalization_note():
 
 
 def test_version_finding_from_network_origin_stays_a_hypothesis():
-    # Default origin ("network") behaviour is unchanged by Fase 0.9.
+    # Default origin ("network") stays an unconfirmed hypothesis.
     engine = LybraEngine(cve_lookup=_lookup_for(("openbsd", "openssh")))
     findings = engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])
 
@@ -455,7 +455,7 @@ def test_informational_finding_for_inventory_service_with_a_port_is_unaffected()
     assert "22/tcp" in finding["title"]
 
 
-# --------------------------------------- cpe_resolved observability (Fase I-b)
+# --------------------------------------- cpe_resolved observability
 
 def test_informational_finding_flags_unresolved_cpe():
     # No override, no alias index wired: cannot resolve -> the informational
@@ -511,7 +511,7 @@ def test_services_from_payload_empty_returns_empty():
     assert services_from_payload([]) == []
 
 
-# ─────────────── qué nombres no se consiguen resolver (L37)
+# ─────────────── qué nombres no se consiguen resolver
 #
 # `_resolve_cpe` devuelve None sin inventar un CPE cuando ninguna estrategia
 # acierta, y esa decisión es correcta: uno fabricado que NVD no conozca no

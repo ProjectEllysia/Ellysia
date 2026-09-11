@@ -71,7 +71,7 @@ def _seed_user_data(app, user_id: int) -> None:
             session.add(AuthorizedTarget(user_id=user_id, target="10.0.0.1"))
             session.add(IrisMailboxConnection(
                 user_id=user_id, provider="gmail", account_email="a@b.test",
-                scopes="", refresh_token_enc="x",
+                scopes="", refresh_token="x",
             ))
             session.add(AegisOrgProfile(user_id=user_id))
             distribution_list = DistributionList(user_id=user_id, name="Lista")

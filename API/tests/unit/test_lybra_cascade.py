@@ -1,4 +1,4 @@
-"""La cascada de identificación para servicios fuera de su puerto canónico (L10).
+"""La cascada de identificación para servicios fuera de su puerto canónico.
 
 Los predicados de aplicabilidad deciden por nombre o por número de puerto, y en
 el camino de autodescubrimiento el nombre sale a su vez de una tabla de
@@ -236,8 +236,8 @@ def test_a_blind_probe_that_raises_does_not_stop_the_next_one():
 
 def test_the_cascade_is_derived_from_the_registry_not_a_parallel_list():
     """La razón de que `banner_readers` y `blind_probers` se calculen y no se
-    escriban: una lista paralela es exactamente lo que se queda atrás. #272
-    documenta el caso — un mapa a mano con dos entradas mientras el módulo ya
+    escriban: una lista paralela es exactamente lo que se queda atrás. Ya
+    pasó: un mapa a mano con dos entradas mientras el módulo ya
     definía once predicados."""
     dissectors = default_dissectors()
     readers = {dissector.label for dissector in banner_readers(dissectors)}

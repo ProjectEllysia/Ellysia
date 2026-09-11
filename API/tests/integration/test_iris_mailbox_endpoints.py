@@ -16,6 +16,7 @@ import pytest
 from src.modules.features.iris.managers.mailbox import IrisMailboxManager
 from src.modules.features.iris.model import IrisMailboxConnection
 from src.modules.features.iris.repositories import IrisMailboxConnectionRepository
+from src.modules.features.iris.services.mailbox.base import MailboxFolder
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import encrypt_at_rest
 
@@ -26,7 +27,7 @@ def _save_connection(app, user_id, **overrides) -> int:
     defaults = dict(
         user_id=user_id, provider="gmail", account_email="victim@example.com",
         scopes="gmail.metadata",
-        refresh_token_enc=encrypt_at_rest("refresh-token", purpose="iris_mailbox"),
+        refresh_token="refresh-token",
         status="active",
     )
     defaults.update(overrides)
@@ -167,3 +168,40 @@ def test_sync_queues_and_returns_202(client, admin_user, auth_headers, app):
                            headers=auth_headers(admin_user))
     assert resp.status_code == 202
     submit_sync.assert_called_once_with(connection_id)
+
+
+# --------------------------------------------------------------- folder
+
+def test_update_connection_folder_too_long_returns_422(client, admin_user, auth_headers, app):
+    connection_id = _save_connection(app, admin_user.id)
+    resp = client.patch(f"/iris/mailbox/connections/{connection_id}",
+                        headers=auth_headers(admin_user), json={"folder": "x" * 256})
+    assert resp.status_code == 422
+
+
+def test_connect_folder_too_long_returns_422(client, root_headers):
+    resp = client.post("/iris/mailbox/connect", headers=root_headers,
+                       json={"provider": "gmail", "folder": "x" * 256})
+    assert resp.status_code == 422
+
+
+def test_folders_unknown_connection_returns_404(client, root_headers):
+    resp = client.get("/iris/mailbox/connections/999999/folders", headers=root_headers)
+    assert resp.status_code == 404
+
+
+def test_folders_returns_provider_folders(client, admin_user, auth_headers, app):
+    connection_id = _save_connection(app, admin_user.id)
+    fake_folders = [
+        MailboxFolder(provider_id="Label_1", display_name="Facturas", folder_type="user"),
+        MailboxFolder(provider_id="INBOX", display_name="Inbox", folder_type="system"),
+    ]
+    with mock.patch.object(IrisMailboxManager, "list_folders", return_value=fake_folders):
+        resp = client.get(f"/iris/mailbox/connections/{connection_id}/folders",
+                          headers=auth_headers(admin_user))
+    assert resp.status_code == 200
+    body = resp.get_json()["folders"]
+    assert body == [
+        {"providerId": "Label_1", "displayName": "Facturas", "folderType": "user"},
+        {"providerId": "INBOX", "displayName": "Inbox", "folderType": "system"},
+    ]

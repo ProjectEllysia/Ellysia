@@ -1,4 +1,4 @@
-"""Tests unitarios de Fase 2: parser de mensaje completo y reglas que
+"""Tests unitarios del parser de mensaje completo y de las reglas que
 dependen del cuerpo/enlaces/adjuntos (``needs_context=True``).
 """
 
@@ -59,7 +59,7 @@ def test_parse_multipart_message_extracts_html_links_and_attachment():
     assert ctx.attachments[0].filename == "invoice.exe"
 
 
-# ------------------------------------------------- Nested message/rfc822 forward (I2)
+# ------------------------------------------------- Nested message/rfc822 forward
 
 def _forward_with_nested_original(inner_from="PayPal Support <support@paypal-security.tk>",
                                    inner_subject="Urgent Verify Account") -> str:
@@ -172,7 +172,7 @@ def test_subject_title_uses_inner_subject_of_report_phishing_forward():
     assert build_subject_title(raw) == "Tu factura caduca hoy"
 
 
-# --------------------------------------------------------------- Received chain (C3/C8)
+# --------------------------------------------------------------- Received chain
 
 def test_received_chain_neutral_when_absent():
     ctx = MessageContext(headers={})
@@ -238,7 +238,7 @@ def test_received_chain_passes_when_consistent():
     assert result.verdict == "pass"
 
 
-# --------------------------------------------------------------- Body links (C10)
+# --------------------------------------------------------------- Body links
 
 def test_body_links_neutral_when_no_links():
     ctx = MessageContext(headers={})
@@ -354,7 +354,7 @@ def test_body_links_passes_when_clean():
     assert result.verdict == "pass"
 
 
-# ------------------------------------------------------- Body links deep URL heuristics (D2)
+# ------------------------------------------------------- Body links deep URL heuristics
 
 def test_body_links_flags_userinfo_credential_lure():
     # http://paypal.com@evil.io/ — everything before '@' is attacker text;
@@ -449,7 +449,7 @@ def test_body_links_does_not_flag_login_on_known_brand_domain():
     assert result.verdict == "pass"
 
 
-# --------------------------------------------------------------- Body content (C12)
+# --------------------------------------------------------------- Body content
 
 def test_body_content_neutral_when_empty():
     ctx = MessageContext(headers={})
@@ -543,7 +543,7 @@ def test_body_content_ignores_responsive_css_in_style_block():
     assert result.score == 0
 
 
-# --------------------------------------------------------------- Suspicious attachments (C11)
+# --------------------------------------------------------------- Suspicious attachments
 
 def test_attachments_falls_back_to_headers_when_no_parts():
     ctx = MessageContext(headers={
@@ -598,7 +598,7 @@ def test_attachments_passes_on_benign_pdf():
 
 
 def test_attachments_includes_sha256_and_md5_when_content_present():
-    # D8: flagged attachments carry hashes so they're pivotable as IOCs.
+    # Flagged attachments carry hashes so they're pivotable as IOCs.
     import hashlib
     content = b"MZ\x00\x00fake-exe-content"
     ctx = MessageContext(headers={}, attachments=[

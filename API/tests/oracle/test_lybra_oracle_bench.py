@@ -1,22 +1,19 @@
-"""Banco de pruebas con oráculo diferencial para Lybra (roadmap §7).
+"""Banco de pruebas con oráculo diferencial para Lybra.
 
 A diferencia del resto de la suite de Lybra (``tests/integration/test_lybra.py``),
 que mockea toda la red a propósito, este módulo hace lo contrario: levanta
 contenedores Docker reales con software conocido y deja que Lybra los descubra,
-identifique y correlacione con la BC **de verdad**, por la red real. Es la pieza
-que el apartado 7 del roadmap pide y que hasta ahora no existía como artefacto
-ejecutable — solo como aspiración documentada.
+identifique y correlacione con la BC **de verdad**, por la red real. Es la
+medición ejecutable que antes sólo existía como aspiración documentada.
 
 Nmap hace de oráculo cuando aplica (concordancia de puertos/fingerprint, igual
 que ``scripts/lybra_concordance_bench.py``); para el resto, la aserción es
 directamente "el motor debe encontrar la CVE/hallazgo tal en el contenedor
-cual", tal y como describe el apartado 9 ("por dónde empezar esta misma
-semana").
+cual".
 
 Requiere Docker. Se salta entero si no está disponible — no forma parte del
-run por defecto de CI (ver ``tests.yml``, marcador ``oracle``), porque el
-propio roadmap trata "correr esta medición" como un paso operativo del
-usuario, no como una puerta de cada commit.
+run por defecto de CI (ver ``tests.yml``, marcador ``oracle``), porque correr
+esta medición es un paso operativo del usuario, no una puerta de cada commit.
 """
 
 from __future__ import annotations
@@ -57,7 +54,7 @@ def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
     """``wait_for_port`` con el cliente Docker ya puesto.
 
     Sin él, un contenedor que muere al arrancar se comunica como un puerto
-    que no contestó, que es el síntoma y nunca la causa (#455).
+    que no contestó, que es el síntoma y nunca la causa.
     """
     wait_for_port(host, port, timeout, docker_path=_DOCKER)
 
@@ -217,8 +214,7 @@ def _tls_container_cmd(days: int, expired: bool) -> str:
 
 @pytest.fixture(scope="module")
 def httpd_2449_port():
-    """Un ``httpd:2.4.49`` real — el mismo ejemplo que usa el propio roadmap
-    (CVE-2021-41773) en el apartado 9."""
+    """Un ``httpd:2.4.49`` real, vulnerable a CVE-2021-41773."""
     port = _free_http_port()
     name = f"lybra-oracle-httpd-{port}"
     _docker("run", "-d", "--name", name, "-p", f"{port}:80", "httpd:2.4.49")
@@ -232,7 +228,7 @@ def httpd_2449_port():
 
 @pytest.fixture(scope="module")
 def git_exposed_port():
-    """Un nginx con ``.git/config`` expuesto — el segundo ejemplo del apartado 9.
+    """Un nginx con ``.git/config`` expuesto.
 
     El fichero se escribe dentro del propio contenedor al arrancar (sin bind
     mount): evita depender de traducción de rutas WSL↔Docker Desktop, que es
@@ -257,9 +253,9 @@ def git_exposed_port():
 @pytest.fixture
 def tls_healthy_port():
     """A self-signed cert that is otherwise healthy — valid for a year, modern
-    protocol. Closes the roadmap's Fase R gap ("la familia tls se quedó fuera
-    del banco automatizado"): a local container with a self-signed cert
-    generated at startup, avoiding both the bind-mount friction the
+    protocol. Covers the tls family in the automated bench: a local container
+    with a self-signed cert generated at startup, avoiding both the
+    bind-mount friction the
     ``.git/config`` fixture already sidesteps and the SNI/IP mismatch a real
     ``badssl.com``-style target would hit through ``AuthorizedTargetManager``
     (IP/CIDR only, no hostnames).
@@ -363,7 +359,7 @@ def _run_self_discovery(app, admin_user, target: str, port: int, monkeypatch):
     """Lanza un escaneo Lybra de autodescubrimiento real contra ``target:port``.
 
     La autorización del objetivo es idempotente a propósito: un test que barre
-    varios contenedores en un solo caso —el banco de precisión de la Fase R—
+    varios contenedores en un solo caso —el banco de precisión de familias—
     llama aquí una vez por objetivo con la misma IP y la misma BD, y el registro
     rechaza duplicados. Lo que este helper necesita es "que esté autorizado", no
     "que se acabe de añadir".
@@ -383,7 +379,7 @@ def _run_self_discovery(app, admin_user, target: str, port: int, monkeypatch):
 
 
 def test_apache_2449_self_discovery_finds_version_and_cve(app, admin_user, httpd_2449_port, monkeypatch):
-    """El motor debe encontrar CVE-2021-41773 en un httpd:2.4.49 real (roadmap §9)."""
+    """El motor debe encontrar CVE-2021-41773 en un httpd:2.4.49 real."""
     with app.app_context():
         with UnitOfWork() as uow:
             repo = KbRepository(uow)
@@ -407,7 +403,7 @@ def test_apache_2449_self_discovery_finds_version_and_cve(app, admin_user, httpd
 
 
 def test_git_config_exposure_detected_against_real_container(app, admin_user, git_exposed_port, monkeypatch):
-    """El check activo debe confirmar el .git/config expuesto (roadmap §9)."""
+    """El check activo debe confirmar el .git/config expuesto."""
     findings = _run_self_discovery(app, admin_user, "127.0.0.1", git_exposed_port, monkeypatch)
 
     exposed = [f for f in findings if f.category == "exposed_path"]
@@ -418,7 +414,7 @@ def test_git_config_exposure_detected_against_real_container(app, admin_user, gi
 
 
 def test_missing_security_headers_detected_against_real_container(app, admin_user, git_exposed_port, monkeypatch):
-    """La familia security_header (Fase R) debe confirmarse contra un nginx real
+    """La familia security_header debe confirmarse contra un nginx real
     que no manda ninguna de las tres cabeceras — vanilla nginx:alpine, sin nada
     de configuración de seguridad."""
     findings = _run_self_discovery(app, admin_user, "127.0.0.1", git_exposed_port, monkeypatch)
@@ -426,13 +422,13 @@ def test_missing_security_headers_detected_against_real_container(app, admin_use
     headers = {f.check_id for f in findings if f.category == "security_header"}
     # La familia esperada sale del feed, no de una lista escrita aquí. La lista
     # estuvo escrita, con tres identificadores, y se quedó atrás en cuanto el
-    # feed creció (#455).
+    # feed creció.
     assert headers == always_missing_header_checks()
     assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "security_header")
 
 
 def test_tls_self_signed_cert_detected_against_real_container(app, admin_user, tls_healthy_port, monkeypatch):
-    """La familia tls (Fase R) debe confirmar el autofirmado contra un
+    """La familia tls debe confirmar el autofirmado contra un
     contenedor real, y no disparar en falso los otros dos checks de la misma
     familia (caducidad, protocolo obsoleto) — el control negativo que hace
     del número de precisión algo medido y no solo aspiracional."""
@@ -456,7 +452,7 @@ def test_tls_expired_cert_detected_against_real_container(app, admin_user, tls_e
 
 # ------------------------------------------- familia network contra servidores reales
 #
-# Los cuatro casos que cierran #265. Hasta aquí, los dos únicos checks no-web
+# Por qué existen estos cuatro casos: hasta aquí, los dos únicos checks no-web
 # del motor sólo se habían ejercitado contra dobles, y por eso nadie vio que el
 # transporte leía una forma de respuesta que ni FTP ni Redis producen: el
 # escaneo terminaba en verde y el FTP anónimo seguía ahí. Un positivo y un
@@ -507,7 +503,7 @@ def test_redis_unauthenticated_access_absent_when_requirepass_is_set(app, admin_
 
 @pytest.mark.skipif(_NMAP is None, reason="nmap no disponible")
 def test_port_discovery_agrees_with_nmap_oracle(httpd_2449_port):
-    """Concordancia de puertos (Fase T) contra Nmap para un objetivo real, no mockeado."""
+    """Concordancia de puertos contra Nmap para un objetivo real, no mockeado."""
     own_ports = scan_ports_sync("127.0.0.1", [httpd_2449_port])
 
     result = subprocess.run(

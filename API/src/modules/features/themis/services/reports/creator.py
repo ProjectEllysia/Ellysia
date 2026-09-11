@@ -1,7 +1,5 @@
 """
 ``PDFCreator``: arma el documento PDF a partir de la estrategia del escaneo.
-
-D5 en ``plans/deuda-tecnica-y-calidad.md``.
 """
 
 import os

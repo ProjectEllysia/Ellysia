@@ -1,4 +1,4 @@
-"""B14: la matriz ABAC de Iris, atada a un test.
+"""La matriz ABAC de Iris, atada a un test.
 
 El `README.md` documentaba `IRIS_UPDATE` para reanálisis, resumen de IA y
 generación de PDF, mientras el código exigía `IRIS_CREATE`. Un cliente que
@@ -61,6 +61,7 @@ _ENDPOINTS = [
     ("get", "/iris/results/999999", AttributeType.IRIS_READ, None),
     ("get", "/iris/results/999999/path", AttributeType.IRIS_READ, None),
     ("get", "/iris/results/999999/iocs", AttributeType.IRIS_READ, None),
+    ("get", "/iris/results/999999/export", AttributeType.IRIS_READ, None),
     ("post", "/iris/results/999999/reanalyze", AttributeType.IRIS_CREATE, None),
     ("post", "/iris/results/999999/ai-summary", AttributeType.IRIS_CREATE, None),
     ("post", "/iris/results/999999/document", AttributeType.IRIS_CREATE, None),
@@ -76,6 +77,14 @@ _ENDPOINTS = [
     ("patch", "/iris/mailbox/connections/999999", AttributeType.IRIS_UPDATE, None),
     ("delete", "/iris/mailbox/connections/999999", AttributeType.IRIS_DELETE, None),
     ("post", "/iris/mailbox/connections/999999/sync", AttributeType.IRIS_UPDATE, None),
+    ("get", "/iris/mailbox/connections/999999/folders", AttributeType.IRIS_READ, None),
+    ("get", "/iris/mailbox/connections/999999/health", AttributeType.IRIS_READ, None),
+    ("get", "/iris/notification-preferences", AttributeType.IRIS_READ, None),
+    ("put", "/iris/notification-preferences", AttributeType.IRIS_UPDATE, {}),
+    ("get", "/iris/retention-policy", AttributeType.IRIS_READ, None),
+    ("post", "/iris/results/999999/feedback", AttributeType.IRIS_UPDATE, {"label": "malicious"}),
+    ("get", "/iris/results/999999/feedback", AttributeType.IRIS_READ, None),
+    ("get", "/iris/feedback/metrics", AttributeType.IRIS_READ, None),
 ]
 
 _ALL_IRIS_ATTRIBUTES = [

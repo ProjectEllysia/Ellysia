@@ -1,10 +1,9 @@
-"""Los checks de configuración de red que la Fase N prometió (L26).
+"""Los checks de configuración de red.
 
-Cierran la parte de la brecha G1 que no se resuelve escribiendo ojos: una
+Cubren la parte de la superficie que no se resuelve escribiendo dissectors: una
 configuración insegura no tiene CVE y no aparece por la vía de la versión.
 
-De los catorce que el issue lista, ocho se construyeron ya en la Fase 2. Aquí
-van los cinco que faltaban: Telnet activo, VNC sin autenticación (plugins
+Aquí van cinco: Telnet activo, VNC sin autenticación (plugins
 script), y relay/STARTTLS de SMTP y FTP sin cifrado (checks network, sobre el
 ``NetworkSession`` real — la misma regla del resto del fichero: un doble por
 encima de la sesión se inventaría capacidades que el transporte real no tiene).
@@ -54,7 +53,7 @@ class _FakeNetSocket:
 
 def _fired(check_id, sock, service):
     # Sólo el check bajo prueba: los checks del mismo servicio comparten la
-    # sesión de red (la caché de sondas de L08), así que ejecutar el feed
+    # sesión de red (la caché de sondas), así que ejecutar el feed
     # entero dejaría a otro check consumiendo el socket antes que éste. Aislarlo
     # es lo que se quiere medir aquí — el comportamiento de un check, no la
     # orquestación.

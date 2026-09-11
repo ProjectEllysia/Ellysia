@@ -116,8 +116,8 @@ class NucleiMetricExtractor(MetricExtractor):
     """Metric: findings. Identity: dedup_key, or the row id for one without.
 
     Identical shape to ``LybraMetricExtractor`` — both scan types live
-    entirely in ``Finding`` (roadmap Fase U1), so there is nothing
-    Nuclei-specific to add here beyond the label.
+    entirely in ``Finding``, so there is nothing Nuclei-specific to add
+    here beyond the label.
     """
 
     metric_label = "Hallazgos"

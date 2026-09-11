@@ -25,7 +25,7 @@ import requests
 
 import src.modules.system.config_reading as CR
 
-from .base import MailboxConnector, MessageRef, TokenSet
+from .base import MailboxConnector, MailboxFolder, MessageRef, TokenSet
 from .registry import register_connector
 
 logger = logging.getLogger(__name__)
@@ -172,6 +172,22 @@ class GmailConnector(MailboxConnector):
         raw_b64url = response.json()["raw"]
         padded = raw_b64url + "=" * (-len(raw_b64url) % 4)
         return base64.urlsafe_b64decode(padded).decode("utf-8", errors="replace")
+
+    def list_folders(self, access_token: str) -> list[MailboxFolder]:
+        response = requests.get(
+            f"{_API_BASE}/labels",
+            headers={"Authorization": f"Bearer {access_token}"}, timeout=_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return [
+            MailboxFolder(
+                provider_id=label["id"], display_name=label["name"],
+                # Gmail ya distingue system (INBOX, SENT, TRASH...) de user
+                # (etiquetas creadas por la cuenta) -- se traslada tal cual.
+                folder_type="system" if label.get("type") == "system" else "user",
+            )
+            for label in response.json().get("labels", [])
+        ]
 
     def revoke(self, refresh_token: str) -> None:
         response = requests.post(_REVOKE_URL, data={"token": refresh_token}, timeout=_TIMEOUT_SECONDS)

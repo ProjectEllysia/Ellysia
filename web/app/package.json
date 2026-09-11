@@ -15,7 +15,7 @@
     "test:toast": "node test/toastStore.test.mjs",
     "test:quiz": "node test/aegis.quizShuffle.test.mjs",
     "test:logs": "node test/logTransport.test.mjs && node test/logWindows.test.mjs",
-    "test:iris": "node test/iris.intake.test.mjs",
+    "test:iris": "node test/iris.intake.test.mjs && node test/iris.compare.test.mjs",
     "test:themis": "node test/themis.scanWindow.test.mjs"
   },
   "dependencies": {

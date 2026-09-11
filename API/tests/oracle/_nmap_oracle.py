@@ -3,16 +3,13 @@
 Un banco de concordancia necesita una referencia externa contra la que medirse,
 y esa referencia es Nmap: la herramienta de identificación de servicios que
 todo el mundo usa, con veinte años de firmas detrás. Medirse contra ella no es
-depender de ella —el motor no la invoca nunca en producción, ver L52— es la
-única forma de convertir «nuestro fingerprinting es bueno» en un número.
+depender de ella —el motor no la invoca nunca en producción, ver la nota sobre
+objetivos externos en ``_target_from_container``— es la única forma de
+convertir «nuestro fingerprinting es bueno» en un número.
 
-**Nmap se ejecuta en un contenedor cuando no está en el sistema.** El banco
-anterior exigía un ``nmap`` instalado en la máquina y se saltaba entero cuando
-faltaba, que en la práctica significaba saltarse entero casi siempre: en un
-portátil de desarrollo con Docker pero sin Nmap —el caso normal— no había
-medición, y por tanto tampoco número. Como todo lo demás en ``tests/oracle/``
-ya necesita Docker, el oráculo pasa a ser un contenedor más
-(``instrumentisto/nmap``) y el banco deja de depender de lo que cada uno tenga
+**Nmap se ejecuta en un contenedor cuando no está en el sistema.** Como todo
+lo demás en ``tests/oracle/`` ya necesita Docker, el oráculo es un contenedor
+más (``instrumentisto/nmap``) y el banco no depende de lo que cada uno tenga
 instalado. Si hay un ``nmap`` en el PATH se usa ése, que es más rápido y evita
 el rodeo por la red del contenedor.
 
@@ -48,10 +45,11 @@ def _target_from_container(host: str) -> str:
     laboratorio, siempre en 127.0.0.1— no es alcanzable por su IP de loopback
     desde dentro de otro contenedor: hay que rebotar por ``host.docker.internal``.
 
-    Un objetivo **externo** (el banco de paridad real, L48) se alcanza por su
-    nombre o IP tal cual: sustituirlo por ``host.docker.internal`` haría que el
-    oráculo escaneara la máquina Docker en vez del objetivo, midiendo algo que
-    no tiene nada que ver. Sólo se reescribe loopback.
+    Un objetivo **externo** (el banco de paridad contra un objetivo real) se
+    alcanza por su nombre o IP tal cual: sustituirlo por
+    ``host.docker.internal`` haría que el oráculo escaneara la máquina Docker
+    en vez del objetivo, midiendo algo que no tiene nada que ver. Sólo se
+    reescribe loopback.
     """
     try:
         if ipaddress.ip_address(host).is_loopback:
@@ -79,7 +77,7 @@ def _docker_args(docker_path: str) -> List[str]:
     host dentro y **termina con código 0**. Nada lanzaba, el banco leía «Nmap
     no identificó nada» y lo apuntaba como desacuerdo de fingerprint. Tres
     tests de concordancia fallaban cada noche por una discrepancia que no
-    existía (#455).
+    existía.
 
     En Docker Desktop la bandera es redundante pero inocua: mapea a la misma
     puerta de enlace que ya estaba puesta.
@@ -143,7 +141,7 @@ def assert_target_was_scanned(document: str, error_output: str, target: str) -> 
     """Comprobar que el oráculo llegó a mirar el objetivo, y no a otra cosa.
 
     Hay dos formas muy distintas de que ``run_nmap_sv`` devuelva un mapa vacío,
-    y confundirlas es lo que tuvo el banco nocturno en rojo tres noches (#455):
+    y confundirlas es lo que tuvo el banco nocturno en rojo tres noches:
 
     - **El puerto no está abierto.** Es un resultado legítimo, y el que la
       documentación de :func:`parse_nmap_xml` describe: Nmap habló con el

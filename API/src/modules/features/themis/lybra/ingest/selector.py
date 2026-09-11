@@ -1,4 +1,4 @@
-"""Selección de checks ingeridos antes de que el runtime los ejecute (Fase R).
+"""Selección de checks ingeridos antes de que el runtime los ejecute.
 
 **El problema que resuelve, en números.** ``CheckRuntime.run`` es
 O(servicios × checks) y ejecuta *todo* check HTTP contra *todo* servicio HTTP.
@@ -10,9 +10,9 @@ hora. Sin esta capa, activar la ingesta no sería una mejora, sería un disparo
 en el pie.
 
 **El criterio, en tres filtros de coste creciente.** Ninguno es sofisticado, y
-eso es deliberado: un índice por CPE de verdad es trabajo mayor y el número de
-la Fase U4 aún no dice si merece la pena. Lo que hay aquí es lo suficiente para
-que activar la ingesta sea seguro.
+eso es deliberado: un índice por CPE de verdad es trabajo mayor y el censo de
+cobertura del feed todavía no dice si merece la pena. Lo que hay aquí es lo
+suficiente para que activar la ingesta sea seguro.
 
 1. **Severidad mínima.** Las plantillas ``info`` de Nuclei son miles de
    detecciones de tecnología; no aportan hallazgos accionables y sí todo el

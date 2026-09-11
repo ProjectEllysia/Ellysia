@@ -1,4 +1,4 @@
-"""B18: un cambio de configuración llega al siguiente análisis.
+"""Un cambio de configuración llega al siguiente análisis.
 
 Los datasets de detección de Iris —marcas, proveedores gratuitos, keywords,
 TLDs sospechosos, tabla de homóglifos— se cachean, y con razón: se consultan

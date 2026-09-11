@@ -126,7 +126,7 @@ def require_agent_key(f):
         if asset is None:
             # keyId desconocido: se ejecuta igualmente una verificación Argon2
             # contra un hash fijo para que el coste temporal sea indistinguible
-            # del de un secreto incorrecto sobre un keyId real (§16.6).
+            # del de un secreto incorrecto sobre un keyId real.
             verify_password(_DUMMY_HASH, secret)
             return jsonify({
                 "error": "unauthorized",

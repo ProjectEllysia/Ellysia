@@ -97,7 +97,7 @@ Ellysia/
 | Module | Description | Status |
 |---|---|---|
 | **Themis** | Nmap, Nikto, Nuclei and Lybra (self-built engine: TCP/UDP discovery, 20+ protocol dissectors, declarative and script checks) scans with PDF reports grouped by remediable unit, traceroute, scheduled execution, AI enrichment, finding triage, folders, and an authorized-targets registry. | Operational |
-| **Iris** | Phishing detection via a 46-rule engine across 10 families, IOC extraction, AI summaries, PDF reports, and automated Gmail/Microsoft 365 mailbox monitoring with phishing email notifications. | Operational |
+| **Iris** | Phishing detection via a 47-rule engine across 10 families — including static inspection of PDF, Office, HTML and ZIP attachments and local OCR of images — for `.eml` and Outlook `.msg` messages, IOC extraction, AI summaries, PDF reports, and automated Gmail/Microsoft 365 mailbox monitoring with phishing email notifications. | Operational |
 | **Acheron** | Client-encrypted credential vault with granular sync, optimistic-concurrency updates and a password generator, consumed by the web client and [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile). The API only ever stores ciphertext. | Operational |
 | **Aegis** | AI-generated security awareness pills with current alerts from INCIBE-CERT and the Lybra knowledge base, quizzes, multi-format export (Markdown/HTML/JSON), and campaign delivery with per-recipient tracking. | Operational |
 | **Hygeia** | Lightweight agent-based monitoring: heartbeat ingestion, presence detection, software inventory with tags, Lybra-powered inventory analysis, and threshold anomaly alerting. | Operational |
@@ -235,13 +235,26 @@ Content-Type: application/json
 
 | Method | Endpoint | Permission | Description |
 |---|---|---|---|
-| `POST` | `/iris/analyze` | `IRIS_CREATE` | Submit email headers/content (optional: `title`) |
-| `GET` | `/iris/capabilities` | `IRIS_READ` | Server-side limits the UI must honour (max message size, min headers, accepted modes, verdict thresholds) |
+| `POST` | `/iris/analyze` | `IRIS_CREATE` | Submit email headers/content (optional: `title`). Optional `mode` (`headers` or `message`) makes the choice explicit: only the field for that mode is validated and analysed |
+| `POST` | `/iris/analyze/batch` | `IRIS_CREATE` | Analyse several `.eml` or Outlook `.msg` files, or a ZIP of them, at once (multipart, repeatable `files` field). Returns a summary and one item per message (`created`, `duplicate`, `rejected`, `failed`) with its analysis |
+| `GET` | `/iris/batches` · `/iris/batches/<id>` | `IRIS_READ` | Recent batches; one batch with the current status of each of its analyses |
+| `GET` | `/iris/capabilities` | `IRIS_READ` | Server-side limits the UI must honour (max message size, min headers, accepted modes, verdict thresholds), the rules headers-only mode leaves uncovered, and the full-message sensitivity notice |
 | `GET` | `/iris/status?id=` | `IRIS_READ` | Analysis progress and status; carries `failureCode`/`failureReason` when the analysis failed |
-| `GET` | `/iris/results` | `IRIS_READ` | List analyses (paginated) |
-| `GET` | `/iris/results/<id>` | `IRIS_READ` | Full report with per-rule scores, analysis quality and detector version |
+| `GET` | `/iris/results` | `IRIS_READ` | List analyses (paginated). Filters: `search`, `verdict`, `status`, `source`, `tag`, `ioc` (searches the IOC index; defanged input such as `hxxp://evil[.]com` is accepted) and `review` (`pending` = finished and never corrected by an analyst, `reviewed`). Each item carries its `tags` and whether it was `reviewed` |
+| `PUT` | `/iris/results/<id>/tags` | `IRIS_UPDATE` | Replace an analysis' tags (the analysis itself is not modified) |
+| `GET` | `/iris/tags` | `IRIS_READ` | Tags in use and how many analyses carry each |
+| `GET`/`POST` | `/iris/triage/views` | `IRIS_READ` / `IRIS_UPDATE` | Saved combinations of list filters, by name |
+| `DELETE` | `/iris/triage/views/<id>` | `IRIS_UPDATE` | Delete a saved view |
+| `GET`/`POST` | `/iris/trusted-senders` | `IRIS_READ` / `IRIS_CREATE` | Per-user trusted senders and domains, with mandatory reason and expiry (1–365 days); `?includeInactive=true` also lists expired and revoked ones |
+| `DELETE` | `/iris/trusted-senders/<id>` | `IRIS_DELETE` | Revoke a trusted-sender exception (kept for the audit, never deleted) |
+| `POST`/`GET` | `/iris/cases` | `IRIS_CREATE` / `IRIS_READ` | Open an analyst case (optionally with analyses); list cases with `countsByStatus` and `status` / `priority` / `assignedToMe` filters |
+| `GET`/`PATCH` | `/iris/cases/<id>` | `IRIS_READ` / `IRIS_UPDATE` | A case with its analyses and timeline; change title, priority, tags or assignment |
+| `POST` | `/iris/cases/<id>/status` · `/iris/cases/<id>/notes` | `IRIS_UPDATE` | Move a case through its lifecycle (closing requires a reason); add a note to its timeline |
+| `POST`/`DELETE` | `/iris/cases/<id>/analyses[/<analysisId>]` | `IRIS_UPDATE` | Link or unlink an analysis |
+| `GET` | `/iris/results/<id>` | `IRIS_READ` | Full report with per-rule scores (each rule with its stable `ruleId`, `severity` and MITRE ATT&CK `mitreTechniques`), analysis quality and detector version |
 | `GET` | `/iris/results/<id>/path` | `IRIS_READ` | Which rules fired and why |
 | `GET` | `/iris/results/<id>/iocs` | `IRIS_READ` | Extracted indicators of compromise |
+| `GET` | `/iris/results/<id>/export` | `IRIS_READ` | Full analysis bundle (result, rules, raw if still retained, Received-path, IOCs) as a downloadable JSON file |
 | `POST` | `/iris/results/<id>/reanalyze` | `IRIS_CREATE` | Re-run the current ruleset as a **new** analysis (returns the new id) |
 | `POST` | `/iris/results/<id>/ai-summary` | `IRIS_CREATE` | Generate an AI plain-language summary (background task); idempotent per analysis, `?regenerate=true` forces a new one |
 | `POST` | `/iris/analyze/<id>/cancel` | `IRIS_UPDATE` | Cancel a running analysis |
@@ -253,14 +266,38 @@ Content-Type: application/json
 | `POST` | `/iris/mailbox/connect` | `IRIS_CREATE` | Start OAuth connection to an external mailbox |
 | `GET` | `/iris/mailbox/callback` | — (public) | OAuth redirect target; CSRF-protected by a signed `state` |
 | `GET` | `/iris/mailbox/connections` | `IRIS_READ` | List monitored mailboxes |
-| `PATCH` | `/iris/mailbox/connections/<id>` | `IRIS_UPDATE` | Pause, resume or reconfigure a connection |
+| `GET` | `/iris/mailbox/connections/<id>/folders` | `IRIS_READ` | Real folders/labels for the connected account (live provider call) |
+| `PATCH` | `/iris/mailbox/connections/<id>` | `IRIS_UPDATE` | Pause, resume or reconfigure a connection (`folder` is validated against the account's real folders) |
 | `DELETE` | `/iris/mailbox/connections/<id>` | `IRIS_DELETE` | Disconnect a monitored mailbox |
 | `POST` | `/iris/mailbox/connections/<id>/sync` | `IRIS_UPDATE` | Trigger an out-of-cycle mailbox poll |
+| `GET` | `/iris/mailbox/connections/<id>/health` | `IRIS_READ` | Connection health: last successful sync vs. last attempt, discovered/accepted/pending/retrying/dead message counts, last sync duration |
+| `GET`/`PUT` | `/iris/notification-preferences` | `IRIS_READ` / `IRIS_UPDATE` | Per-user notification settings: daily digest for non-critical Phishing verdicts, temporary mute, and toggles for the reauthorization-required and stuck-sync alerts. High-confidence Phishing verdicts always notify immediately regardless of these settings |
+| `GET` | `/iris/retention-policy` | `IRIS_READ` | Current retention policy (raw message / full analysis expiry, in days) plus how many of the current user's analyses still retain their raw content vs. have already had it purged |
 
 > [!NOTE]
 > **`CREATE` vs `UPDATE` in Iris.** `IRIS_CREATE` guards the operations that bring a *new* entity into existence and consume quota for it — submitting an analysis, re-analysing (which inserts a brand-new analysis and returns its id, leaving the original untouched), generating an AI summary, generating a PDF. `IRIS_UPDATE` guards changes to something that already exists: cancelling a running analysis, pausing a connection, forcing a poll. The full matrix is pinned by `API/tests/integration/test_iris_permissions.py`, which asserts both that the documented attribute opens each endpoint and that every other Iris attribute is refused.
 
-Iris applies rules across authentication (SPF, DKIM, DMARC, ARC), header anomalies, reply-chain/thread attacks, content heuristics (including QR-code/quishing detection), and domain spoofing, producing verdicts `Legitimate` / `Suspicious` / `Phishing`. Connected mailboxes are polled periodically by the scheduler and analyzed automatically; when a monitored mailbox receives mail judged `Phishing`, the user is notified by email (`iris.notify`). Thresholds are configured in `SecOpsConfig.json`.
+Iris applies rules across authentication (SPF, DKIM, DMARC, ARC), header anomalies, reply-chain/thread attacks, content heuristics (including QR-code/quishing detection and OCR of the text inside images), attachments (static inspection of their content) and domain spoofing (registrable domains from the Public Suffix List, IDN homographs through Unicode's full confusables table), producing verdicts `Legitimate` / `Suspicious` / `Phishing`. Connected mailboxes are polled periodically by the scheduler and analyzed automatically; when a monitored mailbox receives mail judged `Phishing`, the user is notified by email (`iris.notify`). Thresholds are configured in `SecOpsConfig.json`.
+
+**Stable rule taxonomy.** Every rule declares a stable id (`iris.<group>.<name>`, e.g. `iris.links.body_links`), a severity (`low`/`medium`/`high`/`critical`, independent of the score) and, only where one genuinely fits, its MITRE ATT&CK techniques; registration fails at startup on a missing, malformed or duplicated id. Each finding stores them as they were when the message was analysed (`IrisRuleResult.rule_id`, `severity`, `mitre_techniques`), so a later catalogue change does not rewrite history, and the comparison of two analyses matches rules by `ruleId`.
+
+**Outlook `.msg`.** An Outlook `.msg` (a Compound File Binary, not RFC 5322 text) is converted to a canonical `.eml` (`services/msg_converter.py`, read with `olefile`) before anything else sees it: the original Internet transport headers (`Received`, `Authentication-Results`, DKIM, `Message-ID`) when Outlook kept them, text/HTML bodies or the text of a compressed-RTF body, attachments with their `Content-ID`, and forwarded-as-attachment messages as `message/rfc822` parts the parser unwraps. The converted message carries `X-Iris-Source-Format: outlook-msg`. `.msg` files enter through `POST /iris/analyze/batch` (the SPA sends a single dropped `.msg` that way, since the browser cannot read its headers).
+
+**Attachment inspection.** Suspicious Attachments opens the content of each attachment, never executing or rendering it (`services/attachment_inspectors/`): JavaScript, `/Launch`, embedded files and submit forms in PDFs (also inside Flate-compressed object streams, and through `#xx`-escaped names); macros, remote templates, external relationships and DDE in OOXML documents; HTML smuggling, credential forms and obfuscated script in HTML/SVG; bundled executables, encryption, path traversal, bombs and excessive nesting in ZIPs, whose inspectable entries are inspected too. The inspector is chosen by the file signature before the declared name. Everything is bounded by `features.iris.attachmentInspection` — a single `maxExpandedBytes` budget shared by an attachment and everything inside it, plus `maxInspectedBytes`, `maxArchiveEntries`, `maxArchiveDepth`, `maxCompressionRatio` and `maxPdfStreams`. Each finding weighs `features.iris.scoring.attachment.<reason>`; URLs found in attachments are kept as `embedded_urls`.
+
+**OCR of images.** Image Text Phishing reads the text inside the message's images with Tesseract **running locally** — no image is ever sent to a third party — and runs it through the body's credential, urgency, brand and URL checks. The pixel count is checked from the image header before decoding, the engine only ever receives a PNG re-encoded from the pixels, and it runs in its own process with a timeout. Settings live in `features.iris.ocr` (`enabled`, `languages`, `maxImages`, `minImageBytes`, `maxPixels`, `timeoutSeconds`); the API image installs `tesseract-ocr` and `tesseract-ocr-spa`, and without the binary the rule stays neutral. The recognised text is kept as evidence only as a short, PII-redacted excerpt.
+
+**Raw storage, redaction and retention (M09/B17/B19).** The raw email content (headers, or the full `.eml` in full-message mode) is stored encrypted at rest in its own table, `IrisRawMessage`, separate from the `IrisAnalysis` row that holds the queryable result (score, verdict, per-rule findings). This lets the raw content be purged on its own — after `iris.rawMessageRetentionDays` (90 by default) — without losing the analytical result, which is kept indefinitely unless `iris.analysisRetentionDays` is set to a positive number (`0` disables full deletion). A scheduled job on the same scheduler that polls mailboxes (`iris.retentionCheckIntervalHours`, 24 by default) applies this policy; `GET /iris/retention-policy` shows it, along with how many of the current user's analyses still have their raw retained. Once a given analysis's raw has been purged, `GET /iris/results/<id>/path` and `.../iocs` (both derived on demand from the raw) return `410 Gone`; the main result stays fully available. The exportable PDF report — the one view of an analysis that leaves the authenticated panel once downloaded — redacts email addresses, phone numbers and card-like numbers from the raw headers dump (`iris.redactPiiInReports`, on by default), except the sender/recipient/reply-to/return-path addresses already shown in the report's own summary, which are the evidence the report exists to show.
+
+**Explicit analysis mode.** The UI lets the user choose between *headers only* and the *full message* (`.eml`). `GET /iris/capabilities` publishes which rules have nothing to inspect in headers-only mode and the notice that the full message may contain sensitive data, so both are shown before submitting; `POST /iris/analyze` takes the chosen `mode` and only validates the field it will analyse.
+
+**Trusted senders.** A user can declare a sender address or domain as trusted, with a reason and an expiry, to stop a recurring false positive without touching the global configuration. An exception only applies when the message proves it comes from that sender (DMARC `pass` stated by a verifier above the trust boundary, see below), and it only neutralises the wording and layout heuristics it covers — never authentication, attachments, links, domain impersonation or structural forgeries, whose gates keep firing. Each analysis records the exception that matched (`trustApplied`): whether it applied and which rules it neutralised. Exceptions are per user, not per organisation: an organisation shares plan and billing, not data.
+
+**Triage history.** The analysis list supports saved views, analyst tags, a pending-review queue and search by indicator of compromise. IOCs of the verdict-deciding message are indexed in `IrisIndicator` when an analysis finishes and survive the raw purge; analyses finished before this index existed are only searchable by IOC after a reanalysis. Two analyses can be opened side by side, with the rules that differ listed first.
+
+**Analyst cases.** A case (`IrisCase`) groups one or several analyses — which never change — and records the human decision: status (`new` → `triage` → `contained` → `resolved` / `false_positive`; closing requires a reason and a closed case reopens to `triage`), priority, tags, assignment and a timeline of every change and note. A case can only be assigned to its owner, the only user who can see its analyses.
+
+**Batch analysis.** `POST /iris/analyze/batch` takes several `.eml` or `.msg` files or a ZIP and sends each message through the same `IrisManager.analyze()` as a single submission (a `.msg` is converted to `.eml` first, and the size cap applies to both the `.msg` and the converted message). Entries that cannot be analysed (neither `.eml` nor `.msg`, over `iris.maxMessageBytes`, encrypted, nested ZIP, a damaged `.msg`) are rejected one by one; ZIP entries are read with a size cap, so a decompression bomb is never fully expanded. A batch over `iris.batchMaxItems` or `iris.batchMaxTotalBytes` is rejected whole (400), and so is one that would push the user's analyses in flight over `iris.maxActiveAnalysesPerUser` (429): nothing is created in either case. A message already in the batch or already analysed by the user (same `IrisAnalysis.content_sha256`) is not analysed or charged again.
 
 **Trust boundary.** `Authentication-Results` and `Received` headers are partly written by whoever sent the message: MTAs *prepend* their own `Received`, so the lower hops are supplied by the sender and can be fabricated. Iris only trusts an `Authentication-Results` whose `authserv-id` matches a hop **above** the trust boundary — the contiguous run of hops belonging to the delivering organisation, plus any verifier listed in `features.iris.data.trusted_authserv_ids` (empty by default; without it trust is derived from the chain itself). An `ARC-Seal: cv=pass` is treated as context, never as permission to suppress SPF/DMARC/alignment gates, unless a trusted verifier confirms it with `arc=pass` in its own `Authentication-Results`.
 
@@ -410,11 +447,18 @@ Each entry point is a `@staticmethod` on the owning module's manager class — p
 | `iris.ingest` | Iris | `IrisMailboxManager.execute_sync_connection` (periodic mailbox sync) | `iris-mailbox-sync:<id>` |
 | `iris.report` | Iris | `IrisReportManager.execute_report_generation` | `iris-doc:<id>` |
 | `iris.notify` | Iris | `IrisPhishingNotifyManager.execute_notify_phishing` | `iris-phishing-notify:<id>` |
+| `iris.notify` | Iris | `IrisDigestNotifyManager.execute_notify_digest` (daily digest of non-critical Phishing verdicts) | `iris-digest-notify:<userId>` |
+| `iris.notify` | Iris | `IrisReauthNotifyManager.execute_notify_reauth` (mailbox connection needs reauthorization) | `iris-reauth-notify:<connectionId>` |
+| `iris.notify` | Iris | `IrisStuckSyncNotifyManager.execute_notify_stuck` (active connection stuck without a clean sync) | `iris-stuck-sync-notify:<connectionId>` |
 | `hygeia.notify` | Hygeia | `HygeiaNotifyManager.execute_notify_critical_anomaly` | `hygeia-notify:<id>` |
 
 - **Progress reporting**: workers update `job.meta["progress"]` via `_Task(progress_callback=...)`.
 - **Cooperative cancellation**: set Redis key `taskqueue:cancel:{job_id}`; workers check via `_Task.wait(cancel_check=...)` and terminate the subprocess tree.
 - The `max_workers` setting is read at worker startup only — changes via `PUT /system/tasks/config` apply on the next worker restart.
+- **Transactional outbox** (`system/taskqueue/outbox.py`): the naive "commit the entity, then `submit()` the job" sequence leaves a window where an API restart or a Redis blip strands the entity with no job to process it. The fix writes a `TaskDispatch` row in the same transaction as the entity and publishes it right after, falling back to a periodic sweep (`TaskDispatchScheduler`) and a startup reconciliation pass if the immediate publish fails. Delivery is at-least-once, so every entry point reached this way must be safe to run twice.
+  - Publishing a row commits its `dispatched` mark immediately, independently of the surrounding HTTP request, so a request that fails after publishing never sends an already-queued job back to `pending`.
+  - Applied to: `themis.scan` (all five scanners, via the shared `ScanManager._create_scan_and_dispatch`), `aegis.generate`, `aegis.campaign`, `iris.analyze`, `hygeia.notify` (critical anomalies from ingest and `host_down` from the presence check), and the two `iris.notify` notices guarded against repetition — mailbox re-authorization and stuck sync. In these notices the row committed before enqueuing is the anti-duplicate guard itself, so a lost enqueue used to suppress the email for good rather than delay it.
+  - Not applied to the remaining categories. `themis.traceroute` and `iris.ingest` persist no row before enqueuing, so no entity can be stranded; `themis.report`, `iris.report` and `iris.ai_summary` already mark their row failed (and refund quota, for the AI summary) when the enqueue is rejected. The phishing and digest `iris.notify` notices have no guard: a lost phishing enqueue costs one email, and a lost digest is picked up by the next periodic pass.
 - Admin REST surface: `/system/tasks/*` (status, list, detail, cancel).
 
 > [!WARNING]
@@ -456,7 +500,7 @@ cd web/app
 npm test                  # all nine suites — this is what CI runs
 
 npm run test:acheron      # schema/label correspondence + crypto interop + CRUD + sync for the Acheron vault client
-npm run test:iris         # file-intake limits (the size threshold comes from GET /iris/capabilities)
+npm run test:iris         # file intake (size limit from GET /iris/capabilities, explicit mode, batch drops) and report comparison
 npm run test:hygeia       # metric-formatting tests for the Hygeia dashboard
 npm run test:polling      # usePolling composable tests
 npm run test:element-width # useElementWidth composable tests
@@ -735,6 +779,10 @@ GRAPH_TENANT_ID=...             # optional; "common" allows any account
 IRIS_MAILBOX_ENCRYPTION_KEY=... # Fernet key that encrypts stored OAuth refresh tokens at rest
 ```
 
+Iris also needs `IRIS_RAW_MESSAGE_ENCRYPTION_KEY`, which is **not** listed above because it is not a connector setting: it encrypts the raw content of every analysed email, mailbox or not. See [Encryption keys](#encryption-keys).
+
+**What each provider's OAuth scope actually grants (B19):** Gmail uses `gmail.metadata`, a true headers-only scope — when a connection has "full message mode" off, the app never sees the message body at all, not just at the application level. Microsoft Graph has no equivalent: `Mail.Read` grants the full message body regardless of Iris's own headers-only setting, because Graph does not offer a metadata-only delegated permission for mail. With full message mode off, the Microsoft connector still only *requests* headers — it never calls for the body — but the OAuth consent itself grants more than Iris uses. This is a platform limitation, not a gap in this codebase (see `services/mailbox/microsoft.py`'s module docstring). Whichever provider is used, the raw content Iris does fetch is stored encrypted and separately from the analysis result (`IrisRawMessage`), and is purged independently of it by the retention policy — see `GET /iris/retention-policy`.
+
 ## Technology stack
 
 | Layer | Technology |
@@ -749,6 +797,7 @@ IRIS_MAILBOX_ENCRYPTION_KEY=... # Fernet key that encrypts stored OAuth refresh 
 | Scanning | Nmap + python-nmap, Nikto, Nuclei, Lybra (self-built engine), traceroute |
 | Vulnerability data | Local Lybra KB: NVD API 2.0 · CISA KEV · FIRST EPSS · distribution advisories in OVAL/CSAF for backport verification (daily sync); INCIBE-CERT RSS for Aegis alerts |
 | PDF reports | ReportLab + Pillow |
+| Email analysis (Iris) | Python `email` (RFC 5322/MIME), olefile (Outlook `.msg`), publicsuffixlist + confusable-homoglyphs (registrable domains, IDN homographs), OpenCV (QR codes), Tesseract (local OCR) |
 | AI / LLM | Ollama (local) / OpenAI / Google Gemini (swappable via `scribe`) |
 | Mailbox connectors | Gmail API, Microsoft Graph (OAuth 2.0) |
 | Email delivery | SMTP via `herald` |
@@ -772,6 +821,29 @@ Ellysia uses a layered configuration system (`API/src/modules/system/config_read
 Config is read through frozen dataclasses bound to a branch of the tree (`@config_block`, e.g. `CR.nuclei_config().rate_limit`), not one getter per value, and cached — changes to `SecOpsConfig.json` require an app restart unless applied via `PUT /system`. Background jobs pick them up too: the worker re-reads the file per job when its mtime changed (`CR.reload_if_changed()`).
 
 The config panel (`web/app/src/views/ConfigView.vue`) exposes every settable key of the tree — the AI and email layers, the Themis knowledge base and Lybra engine dials, JWT and MFA policy, Hygeia thresholds, limits and report palette. The one branch deliberately left out is `features.iris.data.*`: those are the anti-phishing heuristic corpora (word lists, homoglyph maps, suspicious TLDs), detection content rather than deployment settings. `API/tests/unit/test_config_view_paths.py` pins the panel's paths against the JSON — the literal ones by full path, the ones composed in a `v-for` by their fixed prefix.
+
+### Encryption keys
+
+Some secrets are stored **encrypted at rest**: the row in the database holds Fernet ciphertext, so reading the database directly yields nothing useful, while the application can still decrypt what it needs. (This is not Acheron, which is zero-knowledge — there the user holds the key and the server never sees plaintext.)
+
+There is no single encryption key. Each kind of secret has its own, so compromising one does not compromise the others and each can be rotated separately. The environment variable name is derived from the purpose (`<PURPOSE>_ENCRYPTION_KEY`), so the list is exactly:
+
+| Variable | What it protects | Required |
+|---|---|---|
+| `MFA_ENCRYPTION_KEY` | Each user's TOTP secret | Only if MFA is used |
+| `IRIS_MAILBOX_ENCRYPTION_KEY` | OAuth refresh/access tokens of each connected mailbox | Only if a mailbox is connected |
+| `IRIS_RAW_MESSAGE_ENCRYPTION_KEY` | Raw content (headers or full `.eml`) of every analysed email | **Yes, for any use of Iris** — including an email pasted by hand |
+
+All three are Fernet keys, generated the same way, and must be **different from each other**:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+> [!WARNING]
+> A missing encryption key fails **late**, not at boot: `get_encryption_key` resolves it lazily on first use, so the API starts fine and the deploy smoke test passes. The error surfaces when someone enables MFA, connects a mailbox, or analyses their first email. Set all three up front even if a feature is unused.
+
+`JWT_SECRET_KEY` is not in this table because it signs tokens rather than encrypting stored data — but unlike these three it is required always, since without it there is no authentication.
 
 > [!WARNING]
 > `features.themis.areLocalIpsAllowed` ships as `false`, and a test pins that value (`test_the_anti_ssrf_defence_ships_enabled`): with `true`, a user can point a scan at the server's internal network or the cloud metadata endpoint. Flip it to `true` in your working copy for local development against private IPs, but do not commit it.

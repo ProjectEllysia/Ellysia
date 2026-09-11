@@ -1,16 +1,14 @@
 """
 Modelos de la capa comercial: catálogo de planes, suscripciones y organizaciones.
 
-Diseño completo en ``plans/feature/general/planes-y-organizaciones.md``. Tres
-grupos de tablas:
+Tres grupos de tablas:
 
 - **Catálogo**: ``Plan`` y ``PlanLimit`` — qué se vende y cuánto incluye.
 - **Titularidad**: ``Subscription`` — quién tiene qué y hasta cuándo.
 - **Organización**: ``Organization``, ``OrganizationMember`` y
   ``OrganizationInvitation`` — un titular paga, sus miembros heredan derechos.
-  Nacen aquí pero no se usan hasta la fase 5.
 
-Más ``UsageCounter``, el contador de consumo que estrena la fase 2.
+Más ``UsageCounter``, el contador de consumo del motor de cuotas.
 
 Nota de alcance: una organización comparte **plan y factura**, nunca datos. No
 hay ninguna relación de aquí hacia bóvedas, escaneos o análisis, y los filtros
@@ -235,7 +233,7 @@ class Subscription(Base):
 
 
 # =========================================================================
-# ORGANIZACIÓN — creadas aquí, en uso desde la fase 5
+# ORGANIZACIÓN
 # =========================================================================
 
 class Organization(Base):
@@ -335,7 +333,7 @@ class OrganizationInvitation(Base):
 
 
 # =========================================================================
-# CONSUMO — creada aquí, en uso desde la fase 2
+# CONSUMO
 # =========================================================================
 
 class UsageCounter(Base):

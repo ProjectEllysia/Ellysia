@@ -20,7 +20,10 @@ from src.modules.accounts import LimitKey, OrganizationManager, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
-from src.modules.system.taskqueue import TaskQueue, job_context
+from src.modules.system.taskqueue import job_context
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox import TaskDispatch, build_dispatch
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 from src.modules.tools.herald import EmailMessage, build_mailer, render_email
 from src.modules.users.model import User
 
@@ -50,7 +53,7 @@ from .services import (
 )
 
 # ---------------------------------------------------------------------------
-# Dependencia de Hygeia sobre Themis (Fase I del roadmap de Lybra).
+# Dependencia de Hygeia sobre Themis: el análisis del inventario con Lybra.
 #
 # Es el ÚNICO import entre módulos de ``features/`` en todo el backend, y es
 # deliberado: Hygeia sabe leer lo que hay instalado en un host, pero no sabe
@@ -73,7 +76,7 @@ def _resolve_host_down_if_open(uow: UnitOfWork, asset_id: int) -> None:
 
     Dos caminos la resuelven, y por eso vive aquí y no dentro de un manager:
     recibir un heartbeat **es** la condición de resolución para este tipo
-    concreto de anomalía (§7.2, no hace falta mirar las métricas del
+    concreto de anomalía (no hace falta mirar las métricas del
     payload), y marcar el activo como no persistente también — silenciar un
     host mientras su aviso sigue sonando no silenciaría nada.
     """
@@ -226,7 +229,7 @@ class HygeiaAssetManager:
     ) -> dict:
         """
         Devuelve la serie temporal de métricas de un activo del usuario, para
-        el gráfico de la SPA (§5, Fase 5).
+        el gráfico de la SPA.
 
         Solo se devuelven los escalares ya desnormalizados por punto — nunca
         el JSONB completo de cada snapshot, que multiplicaría el peso de la
@@ -314,10 +317,10 @@ class HygeiaAssetManager:
 
     def get_power_summary(self, asset_id: int) -> dict:
         """
-        Resume el consumo eléctrico de un activo del usuario (Fase 3, P25).
+        Resume el consumo eléctrico de un activo del usuario.
 
         Devuelve la última lectura conocida más energía y coste de 24 h, 7 d
-        y 30 d, cada una con su procedencia (P24: observada, observada con
+        y 30 d, cada una con su procedencia (observada, observada con
         cobertura parcial, o proyectada), más una proyección mensual
         extrapolada de la ventana de 7 días.
 
@@ -374,7 +377,7 @@ class HygeiaAssetManager:
 
     @staticmethod
     def _summarize_window(since, now, samples: list, config) -> dict:
-        """Aplica P21/P23/P24 a una ventana ya resuelta, con la moneda configurada."""
+        """Media ponderada, energía, coste y procedencia de una ventana ya resuelta."""
         summary = summarize_power_period(
             samples, since, now, config.energy_price_per_kwh, config.retention_days,
         )
@@ -384,7 +387,7 @@ class HygeiaAssetManager:
     def _power_window(
         cls, snapshot_repo: AssetSnapshotRepository, asset_id: int, now, days: int, config,
     ) -> tuple:
-        """Resume una ventana de ``days`` días completa: consulta + P21/P23/P24."""
+        """Resume una ventana completa de ``days`` días: consulta y cálculo de consumo."""
         since, samples = cls._power_window_samples(snapshot_repo, asset_id, now, days, config)
         return cls._summarize_window(since, now, samples, config), samples
 
@@ -430,16 +433,16 @@ class HygeiaAssetManager:
         """
         Lanza un análisis de vulnerabilidades de Lybra sobre el inventario del activo.
 
-        Es el "escaneo autenticado" del roadmap (Fase I) sin escaneo ni
+        Es un "escaneo autenticado" sin escaneo ni
         autenticación remota: el agente ya vive dentro del host y ya reportó
         qué hay instalado, así que basta con traducir ese listado a la forma
         que el motor consume y encolarlo. **No se manda ni un paquete al
-        activo** — el modo payload de Lybra (Fase 0.9) tiene desactivados por
+        activo** — el modo payload de Lybra tiene desactivados por
         contrato el fingerprinting y las comprobaciones activas.
 
         Cada llamada crea un escaneo nuevo; los anteriores se conservan. Eso
         es lo que permite al motor marcar como ``fixed`` un hallazgo que ya no
-        aparece (correlación de ciclo de vida, Fase 5), algo que se perdería
+        aparece (correlación de ciclo de vida), algo que se perdería
         si cada re-análisis borrase al anterior.
 
         Returns:
@@ -500,7 +503,7 @@ class HygeiaAssetManager:
         # Los recuentos llegan hechos desde el listado de Themis. Antes se
         # derivaban aquí recorriendo la lista completa de hallazgos, que era
         # una de las razones por las que ese listado tenía que mandarla entera;
-        # `unresolvedPackages` (Fase I-b observability, `Finding.cpe_resolved`)
+        # `unresolvedPackages` (`Finding.cpe_resolved`)
         # sigue siendo el número real de paquetes que no se pudieron
         # identificar, no una advertencia genérica de "puede que alguno".
         return {
@@ -526,7 +529,7 @@ class HygeiaAssetManager:
         nunca emitida.
 
         Borra además los escaneos Lybra que el inventario de este activo
-        originó (Fase I). Va explícito aquí y no como cascada de base de
+        originó. Va explícito aquí y no como cascada de base de
         datos porque ``LybraScan.asset_id`` es una referencia blanda sin
         ForeignKey, para no acoplar el esquema de Themis al de Hygeia. Se
         hace *antes* de borrar el activo: si fallara, el activo sigue en pie
@@ -846,7 +849,7 @@ class HygeiaIngestManager:
     persistir el snapshot y evaluar los umbrales de CPU/memoria/disco
     (histéresis, apertura/resolución de anomalías). Comparar unos umbrales
     estáticos contra un único snapshot son microsegundos — no justifica una
-    tarea RQ aparte (§6); vive en la misma transacción del request.
+    tarea RQ aparte; vive en la misma transacción del request.
     """
 
     def __init__(self, asset_id: int) -> None:
@@ -856,7 +859,7 @@ class HygeiaIngestManager:
         """
         Procesa un heartbeat ya autenticado y validado por schema.
 
-        El orden importa (§7.2): actualizar la presencia y resolver una
+        El orden importa: actualizar la presencia y resolver una
         anomalía ``host_down`` abierta ocurre **antes** de tocar las
         métricas del propio payload, para que el primer heartbeat tras una
         caída cierre la incidencia sin depender de si sus valores cruzan o
@@ -875,11 +878,11 @@ class HygeiaIngestManager:
                 existe (no debería ocurrir: ``require_agent_key`` ya lo
                 resolvió en esta misma request).
             IngestTooFrequentError: Si el heartbeat llega por debajo del
-                suelo de cadencia configurado para esta clave (§16.2).
+                suelo de cadencia configurado para esta clave.
         """
         check_clock_skew(payload["collectedAt"])
 
-        critical_anomaly_ids: list[int] = []
+        notify_dispatch_ids: list[int] = []
 
         with UnitOfWork() as uow:
             asset_repo = MonitoredAssetRepository(uow)
@@ -898,7 +901,7 @@ class HygeiaIngestManager:
             # conserva el último conocido. El uptime es estado instantáneo, así
             # que se sobreescribe siempre — un None ahí también es información.
             asset.kernel = payload["host"]["kernel"] or asset.kernel
-            # Mismo trato que el kernel (§P29): un agente que aún no reporte
+            # Mismo trato que el kernel: un agente que aún no reporte
             # estos dos campos (versión anterior a esta necesidad) no debe
             # borrar lo que ya se sabía.
             host = payload["host"]
@@ -937,14 +940,25 @@ class HygeiaIngestManager:
             next_interval = asset.heartbeat_interval_sec or CR.hygeia_config().heartbeat_interval_sec
 
             if critical_anomaly_ids:
-                # Durable antes de encolar (§8): el worker de notificación
+                # La anomalía abierta es el guardia anti-duplicado: el próximo
+                # heartbeat la ve activa y no la reabre. Por eso su intención
+                # de avisar viaja en el mismo commit; confirmada sola,
+                # un encolado fallido perdía el correo para siempre.
+                dispatch_repo = TaskDispatchRepository(uow)
+                notify_dispatch_ids = [
+                    dispatch_repo.save(HygeiaNotifyManager.build_dispatch_for(anomaly_id)).id
+                    for anomaly_id in critical_anomaly_ids
+                ]
+                # Durable antes de publicar: el worker de notificación
                 # corre en otro proceso y debe poder leer ya la anomalía.
                 uow.commit_for_handoff()
 
-        # Encolado siempre fuera del UnitOfWork: nunca bloquear la respuesta
-        # al agente por la latencia de SMTP (§8) — el correo lo manda el
-        # worker, no esta request.
-        HygeiaNotifyManager.enqueue_for(critical_anomaly_ids)
+        # Publicar siempre fuera del UnitOfWork: nunca bloquear la respuesta
+        # al agente por la latencia de SMTP — el correo lo manda el
+        # worker, no esta request. Si Redis falla, las filas quedan `pending`
+        # y las recoge el barrido de la outbox.
+        for dispatch_id in notify_dispatch_ids:
+            OutboxDispatcher.dispatch(dispatch_id)
 
         return {
             "ok": True,
@@ -954,7 +968,7 @@ class HygeiaIngestManager:
 
     @staticmethod
     def _enforce_min_interval(asset: MonitoredAsset, now) -> None:
-        """Rechaza un heartbeat que llega antes del suelo de cadencia (§16.2);
+        """Rechaza un heartbeat que llega antes del suelo de cadencia;
         es decir, que el tiempo entre el hearthbeat actual y el último registrado es menor que
         el tiempo dado: ``features.hygeia.limits.minIntervalSec``.
 
@@ -984,7 +998,7 @@ class HygeiaIngestManager:
         Returns:
             IDs de las anomalías recién abiertas con severidad ``critical``.
             El llamador las usa para encolar la notificación por correo
-            **después** de confirmar esta transacción (§8) — nunca desde
+            **después** de confirmar esta transacción — nunca desde
             aquí, que todavía vive dentro del ``UnitOfWork``.
         """
         thresholds = {**CR.hygeia_config().thresholds, **(asset.thresholds or {})}
@@ -1130,7 +1144,7 @@ class HygeiaMaintenanceManager:
     def execute_presence_check() -> None:
         """
         Detecta activos que llevan demasiado callados y transiciona su
-        presencia en dos escalones (§7.1):
+        presencia en dos escalones:
 
         1. ``online`` → ``stale`` en el primer corte (un heartbeat perdido):
            señal visual en el listado de activos, no abre ninguna incidencia.
@@ -1155,17 +1169,22 @@ class HygeiaMaintenanceManager:
         pasada — necesita aparecer como ``stale`` durante al menos un ciclo
         del job antes de poder caer a ``offline``.
 
-        Cada ``host_down`` recién abierto encola su notificación por correo
-        (§8) — este job corre en background (nunca en una request), así que
-        ``UnitOfWork`` ya confirma la transacción al salir del bloque; no
-        hace falta un ``commit_for_handoff()`` explícito para que el worker
-        de notificación vea la anomalía.
+        Cada ``host_down`` recién abierto encola su notificación por correo,
+        y la intención de encolarla se guarda en la misma transacción
+        que la anomalía: la anomalía abierta es el guardia que impide
+        abrir otra en la pasada siguiente, así que si se confirmaba sola y el
+        encolado fallaba después, el correo no llegaba nunca. Este job corre en
+        background (nunca en una request), así que ``UnitOfWork`` ya confirma
+        la transacción al salir del bloque; no hace falta un
+        ``commit_for_handoff()`` explícito para que el worker de notificación
+        vea la anomalía.
         """
-        newly_offline_anomaly_ids: list[int] = []
+        notify_dispatch_ids: list[int] = []
 
         with UnitOfWork() as uow:
             asset_repo = MonitoredAssetRepository(uow)
             anomaly_repo = AnomalyRepository(uow)
+            dispatch_repo = TaskDispatchRepository(uow)
             now = utcnow_naive()
             offline_after_missed = CR.hygeia_config().offline_after_missed
 
@@ -1190,14 +1209,19 @@ class HygeiaMaintenanceManager:
                         saved = anomaly_repo.save(Anomaly(
                             asset_id=asset.id, kind="host_down", severity="critical",
                         ))
-                        newly_offline_anomaly_ids.append(saved.id)
+                        notify_dispatch_ids.append(
+                            dispatch_repo.save(HygeiaNotifyManager.build_dispatch_for(saved.id)).id
+                        )
 
-        HygeiaNotifyManager.enqueue_for(newly_offline_anomaly_ids)
+        # Camino feliz: publicar ya. Si Redis falla, las filas quedan `pending`
+        # y las recogen el barrido periódico o la reconciliación de arranque.
+        for dispatch_id in notify_dispatch_ids:
+            OutboxDispatcher.dispatch(dispatch_id)
 
     @staticmethod
     def execute_retention() -> int:
         """
-        Elimina los ``AssetSnapshot`` anteriores a ``features.hygeia.retentionDays`` (§7.3).
+        Elimina los ``AssetSnapshot`` anteriores a ``features.hygeia.retentionDays``.
 
         Returns:
             Número de filas eliminadas.
@@ -1215,37 +1239,44 @@ class HygeiaNotifyManager:
     Envía la notificación por correo de una anomalía crítica recién abierta.
 
     Se dispara de forma asíncrona (``TaskQueue``, categoría
-    ``hygeia.notify``) tras confirmar la transacción que abrió la anomalía
-    — nunca de forma síncrona en la ingesta ni en el job de presencia, para
-    no bloquear la respuesta al agente ni al propio scheduler por la
-    latencia de SMTP (§8).
+    ``hygeia.notify``) a través de la outbox transaccional, cuya fila se
+    guarda en la misma transacción que abre la anomalía — nunca de forma
+    síncrona en la ingesta ni en el job de presencia, para no bloquear la
+    respuesta al agente ni al propio scheduler por la latencia de SMTP.
     """
 
     TASK_CATEGORY = "hygeia.notify"
+    EXTERNAL_ID_PREFIX = "hygeia-notify:"
 
     @staticmethod
-    def enqueue_for(anomaly_ids: list[int]) -> None:
+    def build_dispatch_for(anomaly_id: int) -> TaskDispatch:
         """
-        Encola la notificación de cada anomalía crítica recién abierta.
+        Construye, sin guardarla, la intención de encolar el aviso de una
+        anomalía crítica recién abierta.
 
-        Debe llamarse siempre **después** de que la transacción que las
-        creó ya sea durable (commit de request/background, o
-        ``commit_for_handoff()`` explícito) — el worker corre en otro
-        proceso y no vería una fila todavía sin confirmar.
+        Los dos llamantes (la ingesta de heartbeats y el detector de
+        presencia) la guardan en la misma transacción que abre la anomalía,
+        porque la anomalía abierta es el propio guardia anti-duplicado
+        (``get_active(asset_id, "host_down") is None``, o ``open_kinds`` en la
+        evaluación de umbrales). Cuando se confirmaba sola y el
+        encolado fallaba después, el correo no se retrasaba: la pasada
+        siguiente veía la anomalía ya abierta y no volvía a avisar nunca.
 
         Args:
-            anomaly_ids: IDs de anomalías con severidad ``critical`` recién
-                abiertas. Una lista vacía es un no-op.
+            anomaly_id: Primary key de la ``Anomaly`` con severidad
+                ``critical`` recién abierta.
+
+        Returns:
+            TaskDispatch: Fila de outbox sin persistir, para el job
+                ``HygeiaNotify-{anomaly_id}`` de la categoría ``hygeia.notify``.
         """
-        task_queue = TaskQueue.get_instance()
-        for anomaly_id in anomaly_ids:
-            task_queue.submit(
-                func=HygeiaNotifyManager.execute_notify_critical_anomaly,
-                args=(anomaly_id,),
-                name=f"HygeiaNotify-{anomaly_id}",
-                category=HygeiaNotifyManager.TASK_CATEGORY,
-                external_id=f"hygeia-notify:{anomaly_id}",
-            )
+        return build_dispatch(
+            HygeiaNotifyManager.execute_notify_critical_anomaly,
+            name=f"HygeiaNotify-{anomaly_id}",
+            category=HygeiaNotifyManager.TASK_CATEGORY,
+            args=(anomaly_id,),
+            external_id=f"{HygeiaNotifyManager.EXTERNAL_ID_PREFIX}{anomaly_id}",
+        )
 
     @staticmethod
     def execute_notify_critical_anomaly(anomaly_id: int) -> None:

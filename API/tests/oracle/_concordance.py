@@ -1,9 +1,9 @@
 """Concordancia con Nmap: la vara de medir, fuera del producto.
 
-Estas tres funciones vivían dentro del paquete que se despliega
-(``lybra/fingerprinting/concordance.py`` y ``lybra/transport.py``). Se mudaron
-aquí en L52, cuando se retiró el acoplamiento de Lybra con escáneres de
-terceros, y la razón de mudarlas en vez de borrarlas merece decirse entera.
+Estas tres funciones viven aquí, fuera del paquete que se despliega
+(``lybra/fingerprinting/concordance.py`` y ``lybra/transport.py``), porque
+Lybra no tiene acoplamiento con escáneres de terceros, y la razón de que
+vivan en los tests en vez de no existir merece decirse entera.
 
 Lo que se retiró del producto es la **subordinación**: que Nmap fuera la
 autoridad en tiempo de ejecución, que un escaneo de Lybra pudiera lanzarse
@@ -15,7 +15,7 @@ Lo que no se retiró es la **medición**. Comparar el motor contra una referenci
 externa en los tests no es acoplamiento: es la única forma de demostrar que el
 motor es bueno en vez de afirmarlo. La independencia se demuestra midiéndose
 contra el mejor del mercado y empatando o ganando, no negándose a la
-comparación — y el objetivo declarado del roadmap (concordancia ≥ 0,90 en
+comparación — y el umbral que este banco exige (concordancia ≥ 0,90 en
 fingerprint, ≥ 0,95 en descubrimiento de puertos) es exactamente esa
 demostración. Aquí, en ``tests/``, la vara de medir existe y el producto no
 sabe que existe.
@@ -88,7 +88,7 @@ def agrees_with_nmap_across_layers(
 ) -> bool:
     """Decide whether **any** layer of our reading agrees with Nmap's.
 
-    Esta variante existe por un desacuerdo que resultó no serlo (L48-b). Contra
+    Esta variante existe por un desacuerdo que resultó no serlo. Contra
     objetivos reales, cinco servicios en tres hosts daban siempre el mismo
     patrón: Lybra decía ``nginx``, Nmap decía ``Apache httpd``. La lectura más
     probable —y la que el catálogo de laboratorio ahora reproduce— es un nginx

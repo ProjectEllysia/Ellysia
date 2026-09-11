@@ -1,13 +1,12 @@
-"""Tests de las reglas/gates nuevos de la recalibración de pesos
-(``plans/feature/iris/iris-rule-weight-recalibration.md``, secciones 3 y 5):
+"""Tests de las reglas/gates nuevos de la recalibración de pesos de Iris:
 
-- Auth Results Provenance (G-A): authserv-id ↔ último `by` del Received.
-- Recipient Domain Lookalike (G-B): lookalike del dominio del destinatario.
-- Display Name Foreign Address (G-C): display name que ES una dirección
+- Auth Results Provenance: authserv-id ↔ último `by` del Received.
+- Recipient Domain Lookalike: lookalike del dominio del destinatario.
+- Display Name Foreign Address: display name que ES una dirección
   de otro dominio.
-- TOAD Callback Pattern (G-D): teléfono + lenguaje de pago sin
+- TOAD Callback Pattern: teléfono + lenguaje de pago sin
   enlaces/adjuntos/hilo previo.
-- External Login Link (G-E): señal informativa para el combo con
+- External Login Link: señal informativa para el combo con
   Alarming Keywords.
 
 Cada regla se prueba en aislamiento (igual que ``test_iris_message_parser.py``)
@@ -39,7 +38,7 @@ def _gated(base_verdict, named):
     return verdict, reasons
 
 
-# --------------------------------------------------------------- G-A: Auth Results Provenance
+# --------------------------------------------------------------- Auth Results Provenance
 
 def test_auth_provenance_flags_authserv_absent_from_received_chain():
     ctx = MessageContext(
@@ -121,7 +120,7 @@ def test_gate_auth_forged_escalates_to_phishing():
     assert reasons
 
 
-# --------------------------------------------------------------- G-B: Recipient Domain Lookalike
+# --------------------------------------------------------------- Recipient Domain Lookalike
 
 def test_recipient_lookalike_flags_typo_of_recipient_domain():
     headers = {
@@ -151,7 +150,7 @@ def test_gate_recipient_lookalike_escalates_to_phishing():
     assert verdict == "Phishing"
 
 
-# --------------------------------------------------------------- G-C: Display Name Foreign Address
+# --------------------------------------------------------------- Display Name Foreign Address
 
 def test_display_name_foreign_address_flags_email_in_display_name():
     headers = {"from": '"ceo@acme.com" <attacker@evil.com>'}
@@ -193,7 +192,7 @@ def test_gate_display_foreign_without_impersonation_only_suspicious():
     assert verdict == "Suspicious"
 
 
-# --------------------------------------------------------------- G-D: TOAD Callback Pattern
+# --------------------------------------------------------------- TOAD Callback Pattern
 
 def test_toad_callback_flags_phone_and_billing_language_without_links():
     ctx = MessageContext(
@@ -236,7 +235,7 @@ def test_toad_callback_passes_without_billing_keywords():
     assert result.verdict == "pass"
 
 
-# --------------------------------------------------------------- G-E: External Login Link
+# --------------------------------------------------------------- External Login Link
 
 def test_external_login_link_flags_non_esp_foreign_host():
     ctx = MessageContext(

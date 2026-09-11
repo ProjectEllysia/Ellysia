@@ -1,16 +1,15 @@
-"""El motor de credenciales por defecto — Fase D del roadmap (L31).
+"""El motor de credenciales por defecto.
 
 Es la **única** familia de detección de Lybra que escribe en el objetivo: cada
-intento es un login real contra un servicio real. El roadmap lo dice sin
-rodeos — *"es una operación que escribe en el objetivo, que puede bloquear
-cuentas, que genera ruido en el SIEM del objetivo y que exige un control de
-tasa y un presupuesto muy distintos a un GET de .git/config"* — y por eso vive
-en su propio módulo, con sus propias guardas, en vez de ser un ``Check`` más
-del DSL declarativo de :mod:`checks`.
+intento es un login real contra un servicio real — una operación que puede
+bloquear cuentas, que genera ruido en el SIEM del objetivo y que exige un
+control de tasa y un presupuesto muy distintos a un GET de .git/config — y
+por eso vive en su propio módulo, con sus propias guardas, en vez de ser un
+``Check`` más del DSL declarativo de :mod:`checks`.
 
 **Las guardas no son opcionales, y son del llamante, no de aquí.** Este
 runtime no decide si debe correr: el manager lo invoca sólo bajo la doble
-puerta del modo agresivo (L40) — objetivo en el registro de autorización *y*
+puerta del modo agresivo — objetivo en el registro de autorización *y*
 petición explícita del usuario —, exactamente igual que cualquier otro check
 ``mode: aggressive``. Lo que sí es responsabilidad de este módulo es el
 presupuesto de intentos: **por cuenta, no por servicio** — tres contraseñas
@@ -31,9 +30,9 @@ Reutiliza deliberadamente piezas de :mod:`checks` en vez de duplicarlas: el
 mismo :class:`~.checks.Matcher` decide si una respuesta demuestra que el login
 funcionó, el mismo :class:`~.checks.Response` es lo que un matcher evalúa, y
 el ``fetch`` inyectado es la misma forma que :class:`~.checks.HttpProbe.fetch`
-ya expone desde L30 (``host, port, method, path, body, headers``) — un intento
-de credenciales *es* una petición HTTP con una cabecera ``Authorization``,
-nada más.
+ya expone (``host, port, method, path, body, headers``) — un intento de
+credenciales *es* una petición HTTP con una cabecera ``Authorization``, nada
+más.
 """
 
 from __future__ import annotations
@@ -62,7 +61,7 @@ QOD_CONFIRMED = 99
 # Servicios candidatos hoy. Sólo HTTP: es donde vive Tomcat Manager, Jenkins y
 # la mayoría de paneles de administración con credenciales de fábrica
 # conocidas, y es el único protocolo para el que ``HttpProbe.fetch`` ya sabe
-# mandar una cabecera ``Authorization`` (L30). Ampliar a FTP/SSH es straight-
+# mandar una cabecera ``Authorization``. Ampliar a FTP/SSH es straight-
 # forward por el mismo camino que las familias ``network`` de checks.py —
 # inyectar un ``attempt`` en vez de un ``fetch`` HTTP—, pero no hay ninguna
 # entrada del feed que lo necesite todavía.
@@ -237,21 +236,21 @@ def _basic_auth_headers(username: str, password: str) -> Dict[str, str]:
 
 
 class CredentialRuntime:
-    """Prueba credenciales de fábrica contra los servicios de un host (Fase D).
+    """Prueba credenciales de fábrica contra los servicios de un host.
 
     Args:
         entries: Las entradas de credenciales a probar.
         fetch: Un ``(host, port, method, path, body, headers) -> Response |
             None`` — la misma forma que :meth:`~.checks.HttpProbe.fetch`
-            expone desde L30.
+            expone.
         rate_limiter: Limitador por host opcional, aplicado antes de cada
             intento — cada login real es tráfico hacia el objetivo, y esta es
             la única familia del motor donde ese tráfico además escribe.
         max_attempts_per_account: Tope de contraseñas distintas probadas
-            contra una misma cuenta (L31) — no contra un mismo servicio. Ver
+            contra una misma cuenta — no contra un mismo servicio. Ver
             el docstring del módulo.
         capture_evidence: Si se adjunta la respuesta que demostró el acceso
-            como evidencia (Fase E) — nunca incluye la contraseña, sólo lo que
+            como evidencia — nunca incluye la contraseña, sólo lo que
             el objetivo respondió.
     """
 

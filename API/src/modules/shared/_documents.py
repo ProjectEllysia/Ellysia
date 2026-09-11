@@ -9,7 +9,7 @@ module; this file no longer holds any LLM client logic.
 import os
 import logging
 
-from typing import Callable, List, Optional, Type
+from typing import Callable, List, Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,16 @@ def submit_report_generation(task_queue, document_id: int, repo_cls: Type, **sub
     nunca acaba), aunque el usuario sí viera el error de "ya hay una tarea
     en curso". Se marca ``error`` y se re-lanza para que el caller siga
     devolviendo el mismo error al cliente.
+
+    Este manejo es la razón por la que los informes de Themis e Iris se
+    quedaron **fuera** de la outbox transaccional, aunque
+    siguen el mismo patrón create-then-enqueue que Themis y Aegis sí migraron:
+    un encolado fallido no deja el documento colgado en ``running`` para
+    siempre, lo marca ``error``, y el usuario ve el fallo y puede volver a
+    pedir el informe -- que es un botón, no una operación que consuma cuota ni
+    acuñe estado. Lo que la outbox añadiría aquí es recuperar sola un PDF que
+    el usuario ya puede regenerar solo, a cambio de acoplar la creación del
+    documento a la tabla de outbox.
     """
     try:
         task_queue.submit(**submit_kwargs)
@@ -138,7 +148,7 @@ class DocumentManager(TaskTrackingMixin):
     """CRUD y ownership compartidos por el ciclo de vida de un documento.
 
     ``ThemisReportManager`` e ``IrisReportManager`` eran el mismo manager con
-    los nombres cambiados (A3 en ``plans/deuda-tecnica-y-calidad.md``): esta
+    los nombres cambiados: esta
     base concentra lo que de verdad era idéntico. La generación en sí
     (``generate_report``/``_generate_pdf_async``/``execute_report_generation``)
     se queda en cada subclase porque el ``render`` y el disparador difieren
@@ -179,6 +189,16 @@ class DocumentManager(TaskTrackingMixin):
         docs = build_repository(self._REPOSITORY).get_documents_by_user(user_id)
         logger.info(f"Se obtuvieron {len(docs)} documentos")
         return docs
+
+    def get_documents_for_user_paginated(
+        self, user_id: int, page: int, per_page: int,
+    ) -> Tuple[List, int]:
+        """Una página de los documentos de un usuario más el total real
+        (B17) -- ``get_documents_for_user`` sigue sin cambios para quien no
+        pagina."""
+        return build_repository(self._REPOSITORY).get_documents_by_user_paginated(
+            user_id, page, per_page,
+        )
 
     def get_documents_by_parent(self, parent_id: int) -> List:
         """Retrieve all documents generated for a specific parent entity."""

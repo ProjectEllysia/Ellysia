@@ -1,5 +1,5 @@
-"""NucleiScanManager — extraido de thirdparty_scans_managers.py (D2 en
-plans/deuda-tecnica-y-calidad.md: ver el docstring de nmap.py para el porqué)."""
+"""NucleiScanManager — extraído del antiguo thirdparty_scans_managers.py (ver el
+docstring de nmap.py para el porqué)."""
 
 import logging
 from typing import Callable, Optional
@@ -32,13 +32,13 @@ logger = logging.getLogger(__name__)
 @ScanManager.register(ScanType.NUCLEI)
 class NucleiScanManager(ScanManager):
     """
-    Manager for Nuclei template-based vulnerability scans (roadmap Fase U1).
+    Manager for Nuclei template-based vulnerability scans.
 
     Unlike Nikto, Nuclei writes no result table of its own — every
     hallazgo vive directamente en ``Finding`` vía ``nuclei_result_to_finding``,
     la misma forma que ``LybraEngineManager`` ya adoptó. Eso es lo que le deja
     entrar gratis en la deduplicación multifuente, el ciclo de vida
-    ``open``/``fixed``/``regressed`` y el scoring contextual de la Fase 5.
+    ``open``/``fixed``/``regressed`` y el scoring contextual de exposición.
 
     Example:
     >>> manager = NucleiScanManager()
@@ -118,21 +118,18 @@ class NucleiScanManager(ScanManager):
             # porque el flujo programado entra por este mismo método.
             QuotaManager().consume(user_id, LimitKey.THEMIS_THIRDPARTY_SCANS)
 
-            scan = self._create_scan_record(
+            scan = self._create_scan_and_dispatch(
                 target=target,
                 user_id=user_id,
                 programed_scan_id=programed_scan_id,
+                func=NucleiScanManager.execute_nuclei_scan,
+                job_name="NucleiScan",
+                trailing_args=(
+                    target, severities, tags, rate_limit, request_timeout, resolved_timeout,
+                ),
+                timeout=resolved_timeout,
             )
             scan_id = scan.id
-
-            self._task_queue.submit(
-                func=NucleiScanManager.execute_nuclei_scan,
-                args=(scan_id, target, severities, tags, rate_limit, request_timeout, resolved_timeout),
-                name=f"NucleiScan-{scan_id}",
-                category=self.TASK_CATEGORY,
-                external_id=self.external_id_for(scan_id),
-                timeout=resolved_timeout + self._scan_timeout_margin,
-            )
 
             logger.info(f"Escaneo Nuclei {scan_id} iniciado")
             return scan_id
@@ -211,7 +208,7 @@ class NucleiScanManager(ScanManager):
         ``apply_lifecycle`` compares against this target's previous Nuclei
         scan so ``state`` is genuinely ``fixed``/``regressed``/``open`` instead
         of always ``open`` — the two things that make Nuclei "enter for free"
-        into Fase 5's correlation, per the roadmap.
+        into the multi-source correlation and exposure scoring.
         """
         results_data = domain_data
         scan_repo = ScanRepository(uow)

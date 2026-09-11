@@ -8,14 +8,17 @@ the output of every individual rule that was executed during the analysis.
 
 from __future__ import annotations
 
+from enum import StrEnum
+from typing import Optional
+
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer,
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
     SmallInteger, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 
-from src.modules.shared import Base, Document, utcnow_naive
+from src.modules.shared import Base, Document, EncryptedText, utcnow_naive
 
 
 class IrisAnalysis(Base):
@@ -28,7 +31,19 @@ class IrisAnalysis(Base):
     Attributes:
         id: Primary key, auto-incrementing integer.
         title: Optional user-defined label for quick identification.
-        raw_headers: Original email headers as plain text.
+        raw_headers: Cabeceras originales (o el ``.eml`` completo) como
+                 texto plano. Property, no columna: el contenido de verdad
+                 vive cifrado en la fila ``IrisRawMessage`` asociada
+                 (``raw_message``, 1:1) para poder purgarlo de forma
+                 independiente sin borrar el resultado analítico ya
+                 calculado. Se lee y se escribe exactamente igual
+                 que antes de esa separación -- ``analysis.raw_headers`` y
+                 ``IrisAnalysis(raw_headers=...)`` siguen funcionando sin
+                 cambios en el resto del código. ``None`` cuando la política
+                 de retención ya ha purgado el raw de este análisis; a partir
+                 de ahí, cualquier vista derivada del raw (cadena Received,
+                 IOCs) deja de estar disponible -- ver
+                 ``IrisManager.get_analysis_path``/``get_analysis_iocs``.
         status: Lifecycle state — "pending", "running", "finished",
                 "failed", or "cancelled".
         total_score: Sum of all rule scores once the analysis completes.
@@ -47,6 +62,50 @@ class IrisAnalysis(Base):
         detector_version: Marca del catálogo de reglas que produjo el
                  resultado (``iris-rules:<n>:<hash>``). Sin ella, un informe
                  guardado deja de ser interpretable cuando el catálogo cambia.
+        confidence: Confianza ordinal del veredicto: "high", "medium" o "low".
+                 **No es una probabilidad** (el score no está calibrado); sale
+                 de reglas deterministas y va siempre con sus motivos en
+                 ``uncertainty_reasons``. NULL en análisis anteriores a que se
+                 calculara. Ver ``services/quality.assess_confidence``.
+        coverage: Qué partes del mensaje se inspeccionaron: ``mode``
+                 ("full_message" o "headers_only") y ``uncoveredRules``, las
+                 reglas de cuerpo, enlaces y adjuntos que no tuvieron
+                 contenido que mirar. NULL en análisis antiguos.
+        uncertainty_reasons: Frases legibles que explican por qué la
+                 confianza no es "high"; lista vacía o NULL si no hay motivos.
+        scoring_snapshot: Política de puntuación con la que se decidió:
+                 perfil, umbrales, techo, suelos por familia, pesos
+                 sobreescritos, huella de datasets, versión de la aplicación y
+                 catálogo (ver ``services/scoring.ScoringPolicy.snapshot``).
+                 Permite reconstruir esa política y responder qué habría
+                 decidido Iris con otra. NULL en análisis anteriores.
+        scoring_version: Marca estable de esa política
+                 (``iris-scoring:<hash>``); dos análisis con la misma marca se
+                 decidieron con las mismas reglas del juego.
+        winning_context: Qué mensaje produjo el veredicto: "inner" (el
+                 original desenvuelto de un reenvío, o el único mensaje si no
+                 lo era) o "wrapper" (el envoltorio del reenvío, cuando es más
+                 grave que el original). NULL en análisis anteriores a que se
+                 guardara, que se leen como "inner". Ver
+                 ``services/contexts.py``.
+        winning_reason: Frase legible que explica por qué ganó ese contexto;
+                 NULL cuando el mensaje no era un reenvío.
+        secondary_context: Resumen del contexto que perdió en un reenvío
+                 (``contextType``, ``verdict``, ``totalScore``,
+                 ``analysisQuality``); NULL cuando no hubo reenvío. Sus
+                 reglas están en ``IrisRuleResult`` con su ``context_type``.
+        trust_applied: Rastro de la excepción de confianza del usuario que
+                 coincidió con el remitente del contexto ganador:
+                 ``entryId``, ``kind``, ``value``, ``reason``, ``applied``
+                 (``False`` si el mensaje no demostró venir de ese remitente)
+                 y ``modulatedRules``. Se guarda aunque la excepción se
+                 revoque después: es la auditoría de por qué este veredicto es
+                 el que es. NULL si ninguna excepción coincidió.
+        content_sha256: Huella SHA-256 del texto analizado (ver
+                 ``services/batch.message_fingerprint``). Reconoce el mismo
+                 correo enviado otra vez, en un lote o suelto, para no
+                 analizarlo ni cobrarlo dos veces. NULL en análisis
+                 anteriores a que se calculara.
         failure_code: Why a ``failed`` analysis failed — "invalid_input"
                  (the submitted text is not an analysable message) or
                  "internal_error" (the pipeline broke). NULL for every
@@ -70,9 +129,26 @@ class IrisAnalysis(Base):
                  que ``detector_version`` para las reglas).
         started_at: Timestamp when the analysis was created.
         finished_at: Timestamp when the analysis reached a terminal state.
+        cancel_requested_at: Cuándo el usuario pidió cancelar, si alguna vez
+                 lo hizo; NULL si nunca se pidió. Se registra siempre que se
+                 llama a ``cancel_analysis()``, gane o no la carrera contra
+                 el worker -- es la traza de la intención del usuario, no del
+                 resultado, así que no se borra ni se sobreescribe aunque el
+                 worker termine primero y el análisis acabe ``finished`` en
+                 vez de ``cancelled``.
         user_id: Foreign key to the owning User.
         user: SQLAlchemy relationship to User.
         rule_results: Ordered list of IrisRuleResult (per-rule outcomes).
+        feedback: Correcciones del analista sobre este análisis
+                 (``IrisAnalystFeedback``), de la más antigua a la más reciente.
+                 Nunca modifican el veredicto de esta fila.
+        tags: Etiquetas del analista (``IrisAnalysisTag``), por nombre.
+                 Tampoco modifican el análisis.
+        case_links: Casos de analista en los que está este análisis
+                 (``IrisCaseAnalysis``); borrar el análisis lo saca de ellos.
+        indicators: Índice de IOCs del contexto ganador (``IrisIndicator``).
+                 Se rellena al terminar el análisis y sobrevive a la purga
+                 del raw por retención.
         connection_id: FK to the IrisMailboxConnection that ingested this
                  message automatically; NULL for manual submissions (the
                  original, still-default flow).
@@ -88,7 +164,6 @@ class IrisAnalysis(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(String(120), nullable=True, default=None)
-    raw_headers = Column(Text, nullable=False)
     status = Column(String(20), nullable=False, default="pending")
     total_score = Column(Float, nullable=True)
     verdict = Column(String(20), nullable=True)
@@ -96,7 +171,17 @@ class IrisAnalysis(Base):
     analysis_quality = Column(String(16), nullable=True)
     failed_rules = Column(JSONB, nullable=True)
     detector_version = Column(String(64), nullable=True)
+    confidence = Column(String(16), nullable=True)
+    coverage = Column(JSONB, nullable=True)
+    uncertainty_reasons = Column(JSONB, nullable=True)
+    scoring_snapshot = Column(JSONB, nullable=True)
+    scoring_version = Column(String(64), nullable=True)
+    winning_context = Column(String(16), nullable=True)
+    winning_reason = Column(Text, nullable=True)
+    secondary_context = Column(JSONB, nullable=True)
+    trust_applied = Column(JSONB, nullable=True)
     failure_code = Column(String(32), nullable=True)
+    content_sha256 = Column(String(64), nullable=True)
     failure_reason = Column(Text, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
     ai_summary_status = Column(String(16), nullable=True)
@@ -105,6 +190,7 @@ class IrisAnalysis(Base):
     ai_summary_prompt_version = Column(String(32), nullable=True)
     started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     finished_at = Column(DateTime, nullable=True)
+    cancel_requested_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
@@ -122,11 +208,106 @@ class IrisAnalysis(Base):
         "IrisDocument", back_populates="analysis",
         cascade="all, delete-orphan",
     )
+    raw_message = relationship(
+        "IrisRawMessage", back_populates="analysis", uselist=False,
+        cascade="all, delete-orphan",
+    )
+    feedback = relationship(
+        "IrisAnalystFeedback", back_populates="analysis",
+        order_by="IrisAnalystFeedback.created_at",
+        cascade="all, delete-orphan",
+    )
+    tags = relationship(
+        "IrisAnalysisTag", back_populates="analysis",
+        order_by="IrisAnalysisTag.name",
+        cascade="all, delete-orphan",
+    )
+    indicators = relationship(
+        "IrisIndicator", back_populates="analysis",
+        cascade="all, delete-orphan",
+    )
+    # "delete" y no "delete-orphan": el vínculo tiene dos padres (el caso y
+    # el análisis) y el que lo quita de un caso es el caso, no el análisis.
+    case_links = relationship(
+        "IrisCaseAnalysis", back_populates="analysis",
+        cascade="all, delete",
+    )
 
     __table_args__ = (
         UniqueConstraint("connection_id", "source_message_uid",
                           name="uq_iris_analysis_connection_source_message"),
+        Index("ix_iris_analysis_user_id", "user_id"),
+        Index("ix_iris_analysis_created_at", "created_at"),
+        Index("ix_iris_analysis_status", "status"),
+        Index("ix_iris_analysis_verdict", "verdict"),
+        Index("ix_iris_analysis_connection_id", "connection_id"),
+        Index("ix_iris_analysis_user_fingerprint", "user_id", "content_sha256"),
     )
+
+    @property
+    def raw_headers(self) -> Optional[str]:
+        """Contenido raw (cabeceras o ``.eml`` completo) de este análisis.
+
+        Delega en ``raw_message.content`` -- ver el docstring de esta clase
+        sobre por qué el raw vive en su propia fila en vez de en
+        una columna de ``IrisAnalysis``. ``None`` si la retención ya lo
+        purgó.
+        """
+        return self.raw_message.content if self.raw_message is not None else None
+
+    @raw_headers.setter
+    def raw_headers(self, value: Optional[str]) -> None:
+        if value is None:
+            self.raw_message = None
+        elif self.raw_message is not None:
+            self.raw_message.content = value
+        else:
+            self.raw_message = IrisRawMessage(content=value)
+
+
+class IrisRawMessage(Base):
+    """Contenido raw (cabeceras o ``.eml`` completo) de un ``IrisAnalysis``,
+    en su propia fila -- separado del resultado analítico.
+
+    Antes vivía en ``IrisAnalysis.raw_headers``, una columna en la misma
+    fila que el score, el veredicto y el resumen de IA: purgar el raw
+    después de un plazo (política de retención) obligaba a elegir entre
+    borrar el análisis entero -- perdiendo el resultado, que sí tiene valor
+    a largo plazo -- o dejarlo indefinidamente, que es justo lo que la
+    retención existe para evitar. Con el raw en su propia fila,
+    ``raw_message = None`` sobre el análisis (o borrar directamente esta
+    fila) purga el contenido sensible sin tocar el resultado.
+
+    ``content`` usa ``EncryptedText`` (cifrado Fernet transparente,
+    ``purpose="iris_raw_message"``) en vez de cifrar/descifrar a mano en
+    cada punto de lectura: el motor de reglas parsea este campo en más de
+    diez sitios distintos de ``managers/analysis.py``, y repetir esa llamada
+    en cada uno convertía cada lectura nueva en una oportunidad de olvidarla.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis`` dueño de este raw; ``UNIQUE``
+                 (relación 1:1) y ``ondelete="CASCADE"`` -- borrar el
+                 análisis borra su raw, nunca al revés.
+        content: El texto plano (cabeceras o ``.eml`` completo), cifrado en
+                 la columna real vía ``EncryptedText``. Nunca ``None`` en una
+                 fila que existe -- la ausencia de raw se modela con la
+                 propia fila ausente (``IrisAnalysis.raw_message is None``),
+                 no con este campo a ``None``.
+        created_at: Cuándo se guardó -- el mismo instante en que se creó el
+                 análisis, salvo que el raw se haya vuelto a asignar (no
+                 ocurre hoy en el flujo normal).
+        analysis: Relación inversa a ``IrisAnalysis``.
+    """
+    __tablename__ = "IrisRawMessage"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"),
+                          nullable=False, unique=True)
+    content = Column(EncryptedText(purpose="iris_raw_message"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    analysis = relationship("IrisAnalysis", back_populates="raw_message")
 
 
 class IrisMailboxConnection(Base):
@@ -134,9 +315,12 @@ class IrisMailboxConnection(Base):
     automatic Iris ingestion.
 
     Stores the minimum needed to re-request access later — never the
-    mailbox content itself. See ``plans/feature/iris/iris-mailbox-connector.md``
-    Fase 2/3 for the full design rationale (why this can't live in Acheron,
-    why the refresh token is encrypted with ``shared._crypto`` instead).
+    mailbox content itself.
+
+    The refresh token cannot live in an Acheron vault: vault fields are only
+    ever decrypted on the client, and the background sync needs the server
+    to use the token on its own, with no user present. So it is stored here
+    instead, encrypted at rest with a server-side key.
 
     Attributes:
         id: Primary key, auto-incrementing integer.
@@ -145,20 +329,37 @@ class IrisMailboxConnection(Base):
         account_email: The connected mailbox's address (plaintext — not a
                  secret, needed to show "which account is this").
         scopes: Space-separated OAuth scopes actually granted.
-        refresh_token_enc: Refresh token, encrypted at rest
-                 (``shared._crypto.encrypt_at_rest(..., purpose="iris_mailbox")``).
-                 Never returned by any endpoint.
-        access_token_enc: Cached access token, encrypted at rest; NULL when
-                 not cached or expired. Optional — the connector can always
-                 fall back to ``refresh()``.
+        refresh_token: Refresh token de OAuth. La columna es
+                 ``EncryptedText`` (``purpose="iris_mailbox"``), así que en
+                 Python es siempre el token en claro y lo cifrado es la fila.
+                 Nunca lo devuelve ningún endpoint.
+        access_token: Access token cacheado, con el mismo cifrado; NULL
+                 cuando no está cacheado o ha caducado. Opcional -- el
+                 conector siempre puede recurrir a ``refresh()``.
+                 Junto con ``refresh_token`` se declara ``deferred`` en el
+                 grupo ``oauth_tokens``: la mayoría de las cargas de esta
+                 fila (listados, health check, planificación del sondeo) no
+                 miran los tokens, y tocar cualquiera de los dos trae los
+                 dos en una sola consulta, que es como los usa
+                 ``_ensure_access_token``.
         access_token_expires_at: Expiry of the cached access token.
-        folder: Provider-specific folder/label to watch; NULL = default
-                 inbox.
+        folder: Provider-specific folder/label id to watch; NULL = default
+                 inbox. Es el ``provider_id`` opaco que ``MailboxConnector``
+                 usa para filtrar ``list_new`` -- nunca texto libre: solo se
+                 guarda tras validarse contra ``MailboxConnector.list_folders()``,
+                así que un valor no vacío siempre corresponde a una
+                 carpeta real de esta cuenta en el momento en que se guardó.
+        folder_display_name: Nombre legible de ``folder`` (p.ej. "Facturas",
+                 "Trabajo/Clientes"); NULL junto con ``folder`` cuando se
+                 vigila la bandeja de entrada por defecto.
+        folder_type: "system" (Inbox, Sent, Trash... del propio proveedor) |
+                 "user" (etiqueta/carpeta creada por la cuenta); NULL junto
+                 con ``folder``.
         full_message_mode: If True, fetch the complete raw message
                  (attachments/body included) instead of headers only. Off
                  by default — the user must opt in explicitly per
-                 connection (see Fase 5 frontend design: this is a
-                 deliberate, not a hidden, choice).
+                 connection (this is a deliberate, not a hidden,
+                 choice).
         sync_cursor: Opaque provider cursor (Gmail historyId / Graph
                  deltaLink) marking how far ingestion has progressed. NULL
                  until the first bootstrap sync runs (see
@@ -176,9 +377,47 @@ class IrisMailboxConnection(Base):
                  (successful or not — used to schedule the next poll).
         last_error: Human-readable last error, if any (e.g. why the
                  connection is ``reauth_required``).
+        sync_started_at: Cuándo empezó el sync actualmente en curso; NULL
+                 cuando no hay ninguno. Se limpia al terminar (éxito o
+                 error) -- no confundir con ``last_sync_at``, que registra el
+                 último intento *terminado*. Existe para que la UI sepa que
+                 hay un sync en marcha sin tener que adivinarlo.
+        sync_job_id: Id del job de TaskQueue que sostiene el lock de sync
+                 actual; NULL cuando no hay ninguno en curso.
+        last_success_at: Cuándo terminó el último sync que dejó la cola de
+                 checkpoint (``IrisMailboxInbox``) completamente vacía -- es
+                 decir, sin ningún mensaje descubierto pendiente de aceptar.
+                 A diferencia de ``last_sync_at`` (que se actualiza aunque
+                 queden mensajes atascados por cuota o por un fallo), esto
+                 es lo que distingue "no hay correo nuevo" de "Iris está
+                 atascado" sin mirar los logs del servidor. NULL si
+                 nunca ha terminado un sync sin dejar nada pendiente.
+        last_sync_duration_ms: Cuánto tardó el último intento de sync
+                 (terminara en éxito o en error), en milisegundos. NULL si
+                 nunca ha habido un intento con ``sync_started_at`` registrado
+                 -- una latencia que crece sync a sync es la señal de
+                 que el proveedor se está degradando antes de que llegue a
+                 fallar del todo.
+        messages_discovered_total: Cuántos mensajes ha descubierto esta
+                 conexión en total desde que existe, contando solo los que de
+                 verdad eran nuevos (no un reenvío del proveedor de algo ya
+                 encolado). Es un contador acumulado porque, a diferencia de
+                 "aceptados" (la tabla ``IrisAnalysis``) o "pendientes"/
+                 "fallidos" (la tabla ``IrisMailboxInbox``), la fila de
+                 checkpoint de un mensaje aceptado se borra al resolverse, así
+                 que sin este contador ese dato desaparecería con ella.
+        stuck_alert_sent_at: Cuándo se avisó por última vez de que esta
+                 conexión lleva atascada más de ``iris.stuckSyncAfterMinutes``.
+                Se limpia en cuanto un sync vuelve a dejar la cola de
+                 checkpoint vacía (mismo punto que actualiza
+                 ``last_success_at``), así que un problema que se resuelve y
+                 vuelve a aparecer más tarde genera un aviso nuevo en vez de
+                 quedar silenciado para siempre por el primero.
         created_at: When the connection was established.
         user: SQLAlchemy relationship to User.
         analyses: Analyses ingested through this connection.
+        inbox_entries: Cola de checkpoint de mensajes descubiertos y aún no
+                 resueltos (ver ``IrisMailboxInbox``).
     """
     __tablename__ = "IrisMailboxConnection"
 
@@ -188,11 +427,15 @@ class IrisMailboxConnection(Base):
     account_email = Column(String(320), nullable=False)
     scopes = Column(String(512), nullable=False)
 
-    refresh_token_enc = Column(Text, nullable=False)
-    access_token_enc = Column(Text, nullable=True)
+    refresh_token = deferred(
+        Column(EncryptedText(purpose="iris_mailbox"), nullable=False), group="oauth_tokens")
+    access_token = deferred(
+        Column(EncryptedText(purpose="iris_mailbox"), nullable=True), group="oauth_tokens")
     access_token_expires_at = Column(DateTime, nullable=True)
 
     folder = Column(String(255), nullable=True)
+    folder_display_name = Column(String(255), nullable=True)
+    folder_type = Column(String(20), nullable=True)
     full_message_mode = Column(Boolean, nullable=False, default=False)
     sync_cursor = Column(Text, nullable=True)
 
@@ -201,14 +444,75 @@ class IrisMailboxConnection(Base):
     ingested_reset_date = Column(Date, nullable=True)
     last_sync_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
+    sync_started_at = Column(DateTime, nullable=True)
+    sync_job_id = Column(String(64), nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
+    last_sync_duration_ms = Column(Integer, nullable=True)
+    messages_discovered_total = Column(Integer, nullable=False, default=0)
+    stuck_alert_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User")
     analyses = relationship("IrisAnalysis", back_populates="connection")
+    inbox_entries = relationship(
+        "IrisMailboxInbox", back_populates="connection",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", "account_email",
                           name="uq_iris_mailbox_connection_user_provider_email"),
+    )
+
+
+class IrisMailboxInbox(Base):
+    """Cola de checkpoint por mensaje entre el listado del proveedor y su ingesta.
+
+    ``IrisMailboxManager._sync_connection`` confirmaba el cursor del
+    proveedor tanto si el lote se ingería entero como si no: una cuota
+    agotada o un fallo a mitad de lote perdían en silencio los mensajes que
+    quedaban sin procesar, porque el proveedor nunca los vuelve a devolver
+    una vez el cursor avanza. Cada mensaje que devuelve ``list_new``
+    se encola aquí antes de intentar ingerirlo, y el cursor del proveedor
+    solo avanza cuando la cola de la conexión queda vacía.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        connection_id: FK a la IrisMailboxConnection que descubrió el
+                 mensaje. ``ondelete="CASCADE"``: la cola de una conexión
+                 borrada no tiene sentido sin ella.
+        provider_message_id: Id opaco del proveedor -- mismo valor que
+                 ``IrisAnalysis.source_message_uid`` una vez ingerido.
+        raw_ref: Datos crudos que ``list_new`` ya trajo sin round-trip extra
+                 (``MessageRef.raw``) -- necesarios para reintentar sin
+                 volver a listar (p.ej. Graph guarda aquí las cabeceras).
+        status: "pending" (reintentable) | "dead" (agotó los reintentos de
+                 ``iris.maxInboxAttempts``; queda visible pero ya no
+                 bloquea el avance del cursor -- una única referencia rota
+                 no puede detener la ingesta del resto para siempre).
+        attempts: Intentos de ingesta fallidos.
+        last_error: Motivo del último fallo, si alguno.
+        created_at: Cuándo se encoló.
+        updated_at: Cuándo se tocó por última vez (reintento o dead-letter).
+    """
+    __tablename__ = "IrisMailboxInbox"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    connection_id = Column(Integer, ForeignKey("IrisMailboxConnection.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    provider_message_id = Column(String(255), nullable=False)
+    raw_ref = Column(JSONB, nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
+
+    connection = relationship("IrisMailboxConnection", back_populates="inbox_entries")
+
+    __table_args__ = (
+        UniqueConstraint("connection_id", "provider_message_id",
+                          name="uq_iris_mailbox_inbox_connection_message"),
     )
 
 
@@ -229,7 +533,30 @@ class IrisRuleResult(Base):
         details: JSONB blob with rule-specific findings and evidence.
         recommendation: Human-readable advice for the user when the
                         rule flagged a problem; null if the rule passed.
-        position: Execution order (0-based) within the analysis.
+        position: Execution order (0-based) within its context.
+        context_type: Qué mensaje evaluó esta fila: "inner" o "wrapper" (ver
+                        ``IrisAnalysis.winning_context``). En un reenvío se
+                        guardan las reglas de los dos contextos; el informe
+                        muestra las del ganador y deja las otras como
+                        contexto secundario. NULL en filas anteriores a que se
+                        guardara, que solo existían para el contexto ganador.
+        evidence: Dónde está, dentro del mensaje, lo que la regla encontró:
+                        lista de ``{kind, locator, excerpt}`` con el contrato
+                        de ``services/evidence.py`` (cabecera y aparición,
+                        rango del cuerpo, parte MIME, adjunto o URL), con el
+                        extracto ya desactivado. NULL si la regla no penalizó
+                        o no pudo anclarse.
+        evidence_unavailable_reason: Por qué un hallazgo no se puede anclar;
+                        NULL si tiene evidencia o si la regla no penalizó.
+        rule_id: Identificador estable de la regla (``iris.<grupo>.<nombre>``),
+                        independiente de ``rule_name``, que es visible y puede
+                        cambiar. NULL en filas anteriores a la taxonomía.
+        severity: Gravedad del hallazgo (``low``, ``medium``, ``high`` o
+                        ``critical``), separada del score; la del catálogo
+                        cuando se analizó. NULL en filas anteriores.
+        mitre_techniques: Técnicas MITRE ATT&CK de la regla cuando se analizó
+                        (``["T1566.002"]``); NULL si no tiene o en filas
+                        anteriores.
         analysis: SQLAlchemy back-reference to the parent IrisAnalysis.
     """
     __tablename__ = "IrisRuleResult"
@@ -243,8 +570,62 @@ class IrisRuleResult(Base):
     details = Column(JSONB, nullable=True)
     recommendation = Column(Text, nullable=True)
     position = Column(SmallInteger, nullable=False, default=0)
+    context_type = Column(String(16), nullable=True)
+    evidence = Column(JSONB, nullable=True)
+    evidence_unavailable_reason = Column(Text, nullable=True)
+    rule_id = Column(String(64), nullable=True)
+    severity = Column(String(16), nullable=True)
+    mitre_techniques = Column(JSONB, nullable=True)
 
     analysis = relationship("IrisAnalysis", back_populates="rule_results")
+
+    __table_args__ = (
+        Index("ix_iris_rule_result_analysis_id", "analysis_id"),
+        Index("ix_iris_rule_result_rule_id", "rule_id"),
+    )
+
+
+class IrisAnalystFeedback(Base):
+    """Corrección de un analista sobre el veredicto de un análisis.
+
+    Es la etiqueta humana —"esto era malicioso", "esto era legítimo", "no se
+    puede saber"— que alimenta la calibración y las métricas del detector.
+    **Nunca cambia el veredicto ya emitido**: ``IrisAnalysis`` sigue diciendo lo
+    que Iris decidió en su momento, y esta tabla dice lo que opinó una persona
+    después. Separarlas es lo que permite medir cuánto se equivoca el motor.
+
+    Cada corrección es una fila nueva, no una edición de la anterior: el
+    historial queda entero (quién cambió de opinión y cuándo), y la etiqueta
+    vigente de un análisis es la más reciente.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis`` corregido; ``ondelete="CASCADE"``,
+                 la corrección no tiene sentido sin el análisis.
+        author_id: FK al ``User`` que la escribió.
+        label: "malicious", "legitimate" o "unknown" (el analista revisó el
+                 mensaje y no puede decidir; cuenta como revisado, pero no
+                 entra en precisión ni recall).
+        note: Nota libre del analista, opcional (hasta 2000 caracteres).
+        created_at: Cuándo se registró.
+        analysis: Relación inversa a ``IrisAnalysis``.
+        author: Relación al ``User`` autor.
+    """
+    __tablename__ = "IrisAnalystFeedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"), nullable=False)
+    author_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    label = Column(String(16), nullable=False)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    analysis = relationship("IrisAnalysis", back_populates="feedback")
+    author = relationship("User")
+
+    __table_args__ = (
+        Index("ix_iris_analyst_feedback_analysis_id", "analysis_id"),
+    )
 
 
 class IrisDocument(Document):
@@ -281,3 +662,451 @@ class IrisDocument(Document):
             f"<IrisDocument(id={self.id}, analysis_id={self.analysis_id}, "
             f"status='{self.status}')>"
         )
+
+
+class IrisNotificationPreference(Base):
+    """Preferencias de notificación de un usuario para las alertas
+    automáticas de Iris: una fila por usuario, creada perezosamente
+    la primera vez que la modifica (ver ``IrisNotificationPreferenceManager``).
+
+    Deliberadamente por usuario y no por conexión: hoy Iris solo tiene un
+    canal de envío (correo, vía ``herald``), y separar preferencias por
+    conexión antes de que exista una segunda variable real que lo justifique
+    sería una tabla más ancha sin ningún control que la necesite todavía.
+    Si en el futuro hace falta silenciar una conexión concreta sin tocar las
+    demás, este es el sitio donde añadir esa columna.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño de estas preferencias; único, porque
+                 solo existe una fila por usuario.
+        digest_enabled: Si está activo, los veredictos Phishing que no sean
+                 de alta confianza (``total_score`` por encima de
+                 ``iris.criticalPhishingScoreThreshold``) no se notifican al
+                 momento -- se agrupan en el resumen diario que envía el
+                 scheduler de Iris (``services/notifications/scheduling.py``).
+                 Los de alta confianza siempre se notifican de inmediato,
+                 esté o no activo el digest.
+        muted_until: Si tiene una fecha futura, ninguna notificación no
+                 crítica se envía hasta entonces (silenciado temporal). Igual
+                 que con el digest, un veredicto Phishing de alta confianza
+                 ignora este campo -- nunca se pierde una incidencia crítica
+                 por estar silenciada. ``None`` cuando no hay silenciado
+                 activo.
+        notify_reauth_required: Si se avisa por correo cuando una conexión
+                 pasa a necesitar reautorización (``status="reauth_required"``).
+                 Por defecto ``True``.
+        notify_sync_stuck: Si se avisa quando una conexión activa lleva más
+                 de ``iris.stuckSyncAfterMinutes`` sin completar un sync
+                 limpio (ver ``IrisMailboxConnection.last_success_at``).
+                 Por defecto ``True``.
+        digest_last_sent_at: Cuándo se envió el último digest a este usuario;
+                 ``None`` si nunca se ha enviado uno. El scheduler lo usa
+                 para saber si ya pasó ``iris.digestIntervalHours`` desde
+                 entonces, y para acotar qué análisis entran en el próximo
+                 envío.
+        created_at: Cuándo se creó esta fila (primera vez que el usuario
+                 tocó sus preferencias).
+        updated_at: Última vez que se modificó cualquier campo.
+        user: SQLAlchemy relationship al ``User`` dueño.
+    """
+    __tablename__ = "IrisNotificationPreference"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False, unique=True)
+    digest_enabled = Column(Boolean, nullable=False, default=False)
+    muted_until = Column(DateTime, nullable=True)
+    notify_reauth_required = Column(Boolean, nullable=False, default=True)
+    notify_sync_stuck = Column(Boolean, nullable=False, default=True)
+    digest_last_sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
+
+    user = relationship("User")
+
+
+class TrustKind(StrEnum):
+    """Qué cubre una excepción de confianza (``IrisTrustedSender.kind``).
+
+    Attributes:
+        SENDER: Una dirección exacta del ``From``.
+        DOMAIN: El dominio del ``From`` y todos sus subdominios.
+    """
+    SENDER = "sender"
+    DOMAIN = "domain"
+
+
+class IrisTrustedSender(Base):
+    """Excepción de confianza de un usuario: un remitente o un dominio del que
+    no quiere seguir recibiendo el mismo falso positivo.
+
+    Es por usuario a propósito, no por organización: una organización comparte
+    plan y factura, no datos (ver ``Organization``), e Iris analiza correo
+    personal; una excepción declarada por el dueño cambiaría los veredictos del
+    correo de sus miembros.
+
+    No se borra al revocarse: ``revoked_at`` la desactiva y la fila queda para
+    la auditoría. Qué hace al analizar un mensaje lo decide
+    ``services/trust.py``: solo se aplica si el mensaje demuestra venir de ahí,
+    y solo neutraliza señales de redacción y de forma, nunca las de
+    autenticación, adjuntos o enlaces.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño, que es también quien la creó;
+                 ``ondelete="CASCADE"``.
+        kind: ``TrustKind``: ``sender`` o ``domain``.
+        value: Dirección o dominio, normalizado en minúsculas (ver
+                 ``services/trust.normalize_trust_value``).
+        reason: Por qué se confía en él; obligatorio.
+        created_at: Cuándo se creó.
+        expires_at: Cuándo deja de aplicarse; como mucho
+                 ``services/trust.MAX_TRUST_EXPIRY_DAYS`` después de crearse.
+        revoked_at: Cuándo se revocó; NULL si no se ha revocado.
+        user: Relación al ``User`` dueño.
+    """
+    __tablename__ = "IrisTrustedSender"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(16), nullable=False)
+    value = Column(String(320), nullable=False)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("ix_iris_trusted_sender_user_id", "user_id"),
+    )
+
+
+class IrisSavedView(Base):
+    """Combinación de filtros del historial de análisis guardada con nombre.
+
+    Permite volver a una cola de trabajo («phishing sin revisar») sin
+    reconstruir cada filtro. ``filters`` usa las mismas claves que los
+    parámetros de ``GET /iris/results``, validadas por
+    ``IrisTriageFiltersSchema``.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño; ``ondelete="CASCADE"``, así que el
+                 borrado de la cuenta se la lleva sin que ``users`` tenga que
+                 conocer esta tabla.
+        name: Nombre visible, único por usuario (hasta 60 caracteres).
+        filters: Filtros y orden: ``search``, ``verdict``, ``status``,
+                 ``source``, ``tag``, ``ioc``, ``review``, ``sort_by`` y
+                 ``sort_dir``; solo los que filtran.
+        created_at: Cuándo se guardó.
+        user: Relación al ``User`` dueño.
+    """
+    __tablename__ = "IrisSavedView"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(60), nullable=False)
+    filters = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_iris_saved_view_user_name"),
+    )
+
+
+class IrisAnalysisTag(Base):
+    """Etiqueta que un analista pone a un análisis para agruparlo.
+
+    Es una fila aparte y no una columna del análisis: etiquetar no modifica
+    ``IrisAnalysis``, que sigue siendo lo que decidió Iris.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis`` etiquetado; ``ondelete="CASCADE"``.
+        name: Etiqueta normalizada (minúsculas, hasta 40 caracteres); única
+                 por análisis.
+        created_at: Cuándo se puso.
+        analysis: Relación inversa a ``IrisAnalysis``.
+    """
+    __tablename__ = "IrisAnalysisTag"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(40), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    analysis = relationship("IrisAnalysis", back_populates="tags")
+
+    __table_args__ = (
+        UniqueConstraint("analysis_id", "name", name="uq_iris_analysis_tag_analysis_name"),
+        Index("ix_iris_analysis_tag_name", "name"),
+    )
+
+
+class IrisIndicator(Base):
+    """Un IOC de un análisis, indexado para buscarlo.
+
+    El raw se guarda cifrado y no se puede consultar con SQL, y la retención
+    lo purga pasado un plazo. Este índice conserva los indicadores del contexto
+    ganador —dominios, URLs, IPs, direcciones y hashes de adjuntos, ver
+    ``services/indicators.py``— para responder «¿qué análisis tocan este
+    dominio?» también después de la purga.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis``; ``ondelete="CASCADE"``.
+        kind: ``domain``, ``url``, ``ip``, ``email`` o ``hash``.
+        value: El indicador en minúsculas, recortado a
+                 ``services/indicators.MAX_INDICATOR_LENGTH``.
+        analysis: Relación inversa a ``IrisAnalysis``.
+    """
+    __tablename__ = "IrisIndicator"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(16), nullable=False)
+    value = Column(String(2048), nullable=False)
+
+    analysis = relationship("IrisAnalysis", back_populates="indicators")
+
+    __table_args__ = (
+        Index("ix_iris_indicator_analysis_id", "analysis_id"),
+        Index("ix_iris_indicator_value", "value"),
+    )
+
+
+class CaseStatus(StrEnum):
+    """Estado de un caso de analista (``IrisCase.status``).
+
+    Las transiciones válidas las fija ``services/cases.ALLOWED_TRANSITIONS``.
+
+    Attributes:
+        NEW: Recién abierto, nadie lo ha mirado.
+        TRIAGE: Alguien lo está investigando.
+        CONTAINED: La amenaza está controlada, pero el caso sigue abierto.
+        RESOLVED: Cerrado; era un incidente real y se trató.
+        FALSE_POSITIVE: Cerrado; no era una amenaza.
+    """
+    NEW = "new"
+    TRIAGE = "triage"
+    CONTAINED = "contained"
+    RESOLVED = "resolved"
+    FALSE_POSITIVE = "false_positive"
+
+
+class CasePriority(StrEnum):
+    """Prioridad de un caso de analista (``IrisCase.priority``).
+
+    Attributes:
+        LOW: Puede esperar.
+        MEDIUM: Por defecto.
+        HIGH: Pasa por delante de la cola.
+        CRITICAL: Incidente en curso.
+    """
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class IrisCase(Base):
+    """Caso de analista: la decisión humana sobre uno o varios análisis.
+
+    Los análisis que agrupa (``IrisCaseAnalysis``) no cambian: el caso es la
+    capa de decisión encima. Todo lo que le pasa queda en su timeline
+    (``IrisCaseEvent``).
+
+    Es de un usuario, igual que sus análisis: una organización comparte plan y
+    factura, no datos (ver ``Organization``), así que ``assignee_id`` solo puede
+    ser el propio dueño, el único que ve esos análisis.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño; ``ondelete="CASCADE"``.
+        title: Título visible (hasta 120 caracteres).
+        status: ``CaseStatus``; empieza en ``new``.
+        priority: ``CasePriority``; por defecto ``medium``.
+        assignee_id: FK al ``User`` asignado; NULL si no está asignado.
+                 ``ondelete="SET NULL"``.
+        tags: Etiquetas normalizadas (ver ``services/tags.py``).
+        resolution_reason: Por qué se cerró; NULL mientras está abierto.
+        created_at: Cuándo se abrió.
+        updated_at: Último cambio (también las notas y los vínculos).
+        closed_at: Cuándo se cerró; NULL si está abierto (o se reabrió).
+        user / assignee: Relaciones a los ``User``.
+        links: Análisis vinculados, en el orden en que se añadieron.
+        events: Timeline, del evento más antiguo al más reciente.
+    """
+    __tablename__ = "IrisCase"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(120), nullable=False)
+    status = Column(String(20), nullable=False, default=CaseStatus.NEW.value)
+    priority = Column(String(16), nullable=False, default=CasePriority.MEDIUM.value)
+    assignee_id = Column(Integer, ForeignKey("User.id", ondelete="SET NULL"), nullable=True)
+    tags = Column(JSONB, nullable=False, default=list)
+    resolution_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    closed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    assignee = relationship("User", foreign_keys=[assignee_id])
+    links = relationship(
+        "IrisCaseAnalysis", back_populates="case",
+        order_by="IrisCaseAnalysis.id",
+        cascade="all, delete-orphan",
+    )
+    events = relationship(
+        "IrisCaseEvent", back_populates="case",
+        order_by="IrisCaseEvent.id",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_iris_case_user_id", "user_id"),
+        Index("ix_iris_case_status", "status"),
+    )
+
+
+class IrisCaseAnalysis(Base):
+    """Vínculo entre un caso y uno de sus análisis.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        case_id: FK al ``IrisCase``; ``ondelete="CASCADE"``.
+        analysis_id: FK al ``IrisAnalysis``; ``ondelete="CASCADE"``.
+        added_at: Cuándo se vinculó.
+        case / analysis: Relaciones inversas.
+    """
+    __tablename__ = "IrisCaseAnalysis"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("IrisCase.id", ondelete="CASCADE"), nullable=False)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"), nullable=False)
+    added_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    case = relationship("IrisCase", back_populates="links")
+    analysis = relationship("IrisAnalysis", back_populates="case_links")
+
+    __table_args__ = (
+        UniqueConstraint("case_id", "analysis_id", name="uq_iris_case_analysis_case_analysis"),
+        Index("ix_iris_case_analysis_analysis_id", "analysis_id"),
+    )
+
+
+class IrisCaseEvent(Base):
+    """Una entrada de la timeline de un caso: un cambio o una nota.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        case_id: FK al ``IrisCase``; ``ondelete="CASCADE"``.
+        actor_id: FK al ``User`` que hizo el cambio; ``ondelete="SET NULL"``.
+        kind: ``created``, ``status_changed``, ``priority_changed``,
+                 ``assigned``, ``title_changed``, ``tags_changed``, ``note``,
+                 ``analysis_linked`` o ``analysis_unlinked``.
+        detail: Datos del cambio (``from``/``to``, ``reason``, ``analysisId``…);
+                 NULL en las notas.
+        note: Texto de una nota; NULL en los demás eventos.
+        created_at: Cuándo pasó.
+        case / actor: Relaciones.
+    """
+    __tablename__ = "IrisCaseEvent"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("IrisCase.id", ondelete="CASCADE"), nullable=False)
+    actor_id = Column(Integer, ForeignKey("User.id", ondelete="SET NULL"), nullable=True)
+    kind = Column(String(24), nullable=False)
+    detail = Column(JSONB, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    case = relationship("IrisCase", back_populates="events")
+    actor = relationship("User")
+
+    __table_args__ = (
+        Index("ix_iris_case_event_case_id", "case_id"),
+    )
+
+
+class BatchItemStatus(StrEnum):
+    """Qué pasó con un mensaje de un lote (``IrisBatchItem.status``).
+
+    Attributes:
+        CREATED: Se creó su análisis.
+        DUPLICATE: Ya estaba en el lote o ya se había analizado; apunta al
+            análisis existente.
+        REJECTED: No se intentó analizar (no es un ``.eml``, pasa del tamaño…).
+        FAILED: Se intentó y falló (no es un correo analizable, sin cuota…).
+    """
+    CREATED = "created"
+    DUPLICATE = "duplicate"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class IrisBatch(Base):
+    """Un lote de mensajes enviado de una vez (``POST /iris/analyze/batch``).
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` que lo envió; ``ondelete="CASCADE"``.
+        total: Mensajes del lote, contando rechazados y repetidos.
+        created_at: Cuándo se envió.
+        items: Un elemento por mensaje, en el orden en que llegaron.
+    """
+    __tablename__ = "IrisBatch"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
+    total = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    user = relationship("User")
+    items = relationship(
+        "IrisBatchItem", back_populates="batch",
+        order_by="IrisBatchItem.position",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_iris_batch_user_id", "user_id"),
+    )
+
+
+class IrisBatchItem(Base):
+    """Un mensaje de un lote y lo que pasó con él.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        batch_id: FK al ``IrisBatch``; ``ondelete="CASCADE"``.
+        position: Orden del mensaje en el lote (0 es el primero).
+        filename: Nombre del ``.eml``; dentro de un ZIP, ``zip/ruta``.
+        status: ``BatchItemStatus``.
+        analysis_id: FK al ``IrisAnalysis`` creado o al que repite;
+                 ``ondelete="SET NULL"``, así que borrar el análisis no
+                 borra el rastro del lote. NULL si se rechazó o falló.
+        error: Por qué se rechazó o falló; NULL en los demás.
+        batch / analysis: Relaciones.
+    """
+    __tablename__ = "IrisBatchItem"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_id = Column(Integer, ForeignKey("IrisBatch.id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False)
+    filename = Column(String(255), nullable=False)
+    status = Column(String(16), nullable=False)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="SET NULL"), nullable=True)
+    error = Column(Text, nullable=True)
+
+    batch = relationship("IrisBatch", back_populates="items")
+    analysis = relationship("IrisAnalysis")
+
+    __table_args__ = (
+        Index("ix_iris_batch_item_batch_id", "batch_id"),
+    )

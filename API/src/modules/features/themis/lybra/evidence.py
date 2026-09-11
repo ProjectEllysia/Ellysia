@@ -1,4 +1,4 @@
-"""La evidencia cruda de un hallazgo — capturada, redactada y con hash (Fase E).
+"""La evidencia cruda de un hallazgo — capturada, redactada y con hash.
 
 Este módulo vive en la capa pura ``lybra/``: **no toca el ORM**. El motor
 recoge la evidencia en una lista en memoria a través de un *recorder*
@@ -42,8 +42,8 @@ _SENSITIVE_HEADERS = frozenset({
 # «aquí había algo y lo quitamos» en vez de esconder que existía.
 _REDACTED = "[redacted]"
 
-# Las clases de evidencia que el modelo reconoce (MS-Fase E). Una entrada con
-# otro ``kind`` no se descarta, pero conviene que la lista viva en un sitio.
+# Las clases de evidencia que el modelo reconoce. Una entrada con otro
+# ``kind`` no se descarta, pero conviene que la lista viva en un sitio.
 EVIDENCE_KINDS = ("http_response", "ssh_banner", "tls_cert", "probe_output")
 
 

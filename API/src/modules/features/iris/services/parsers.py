@@ -58,7 +58,7 @@ def parse_raw_headers(raw: str) -> Dict[str, str]:
         forging their own ``Authentication-Results`` line in the message
         they send), attacker-injected. Keeping "last occurrence wins"
         here handed a one-line spoofing bypass to every rule that reads
-        ``Authentication-Results``/``ARC-Seal`` from this dict (A1, N5).
+        ``Authentication-Results``/``ARC-Seal`` from this dict.
     """
     headers: Dict[str, str] = {}
     current_key: str | None = None
@@ -146,6 +146,11 @@ _HREF_RE = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
 _BARE_URL_RE = re.compile(r'(?<![\'"=])(https?://[^\s<>\'")]+)', re.IGNORECASE)
 
+_SUBJECT_FALLBACK_TITLE = "Correo sin asunto"
+
+#: Límite del campo ``IrisAnalysis.title`` (String(120)).
+_MAX_TITLE_LENGTH = 120
+
 
 @dataclass
 class Link:
@@ -180,14 +185,14 @@ class MessageContext:
     and the ``wrapper_*`` fields preserve just enough of the outer
     message's identity for the report to say so, and ``wrapper_context``
     carries the *full* parsed wrapper so the caller can run the rule
-    engine on it too (N1): a real "report phishing" forward is benign to
+    engine on it too: a real "report phishing" forward is benign to
     unwrap, but an attacker can just as easily send their own phishing as
     the outer message and staple a benign ``.eml`` on as a
     ``message/rfc822`` attachment — unwrapping unconditionally then
     means the 40 rules never see the phishing the victim actually
     received. Analyzing only the unwrapped inner message is what a
     forward-unaware submission always wants; the ingestion pipeline
-    (Fase 3+) is exactly the "automatic, no human forwarding" case where
+    (mailbox ingestion) is exactly the "automatic, no human forwarding" case where
     that assumption stops holding, so it must evaluate both and keep the
     worse verdict.
     """
@@ -336,31 +341,31 @@ def parse_raw_message(raw: str) -> MessageContext:
         envelope. ``unwrapped_from_forward`` is set, ``wrapper_from``/
         ``wrapper_subject`` retain the forwarding envelope's identity for
         the report to reference, and ``wrapper_context`` carries the full
-        parsed wrapper (N1) so the caller can run the rule engine on it
+        parsed wrapper so the caller can run the rule engine on it
         too and keep the worse of the two verdicts — see
         ``MessageContext`` for why analyzing only the unwrapped inner
         message is unsafe once submissions are no longer human-forwarded.
     """
-    message = message_from_string(raw)
+    original_message = message_from_string(raw)
 
-    nested = _find_nested_forward(message)
-    if nested is not None:
+    nested_message = _find_nested_forward(original_message)
+    if nested_message is not None:
         # NOTE: deliberately read the wrapper's From/Subject via the
         # already-parsed ``msg`` object, not ``parse_raw_headers(raw)``.
         # That line-based parser has no concept of a MIME boundary — fed
-        # the *entire* raw multipart text, it happily keeps "reading
+        # the *entire* raw multipart text, it happily keeps "reading"
         # headers" past the blank-line separator and into the nested
         # part's own header block, so its last "From:"/"Subject:" match
         # ends up being the *inner* message's, silently defeating the
         # whole point of capturing the wrapper's identity.
-        context = _message_context_from(nested, nested.as_string())
+        context = _message_context_from(nested_message, nested_message.as_string())
         context.unwrapped_from_forward = True
-        context.wrapper_from = decode_mime_words(message.get("from", "") or "")
-        context.wrapper_subject = decode_mime_words(message.get("subject", "") or "")
-        context.wrapper_context = _message_context_from(message, raw)
+        context.wrapper_from = decode_mime_words(original_message.get("from", "") or "")
+        context.wrapper_subject = decode_mime_words(original_message.get("subject", "") or "")
+        context.wrapper_context = _message_context_from(original_message, raw)
         return context
 
-    return _message_context_from(message, raw)
+    return _message_context_from(original_message, raw)
 
 
 # =============================================================================
@@ -371,12 +376,6 @@ def parse_raw_message(raw: str) -> MessageContext:
 # se deriva del ``Subject`` del mensaje en vez de etiquetar el análisis como
 # "Auto (<cuenta>)" — el asunto es la etiqueta natural de un correo en el
 # historial.
-
-_SUBJECT_FALLBACK_TITLE = "Correo sin asunto"
-
-#: Límite del campo ``IrisAnalysis.title`` (String(120)).
-_MAX_TITLE_LENGTH = 120
-
 
 def build_subject_title(raw: str) -> str:
     """Título de presentación de un análisis ingerido: el asunto del mensaje.

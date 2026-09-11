@@ -1,29 +1,43 @@
 <template>
   <div class="card scanner-card">
-    <div class="scanner-header">
-      <span class="scanner-icon" v-html="iconSvg"></span>
-      <h3>{{ name }}</h3>
-    </div>
-    <div class="scanner-body">
-      <slot />
-      <h4>Paleta de colores</h4>
-      <div class="color-grid">
-        <div v-for="c in colors" :key="prefix + c.key" class="color-pick">
-          <input :id="prefix + '.colorPalette.' + c.key" v-model="flat[prefix + '.colorPalette.' + c.key]" type="color" class="color-input" />
-          <span class="color-label">{{ c.label }}</span>
-          <span class="color-hex">{{ flat[prefix + '.colorPalette.' + c.key] }}</span>
+    <CollapsibleSection :default-open="defaultOpen">
+      <template #header>
+        <div class="scanner-header">
+          <span class="scanner-icon" v-html="iconSvg"></span>
+          <h3>{{ name }}</h3>
         </div>
+      </template>
+      <div class="scanner-body">
+        <slot />
+        <h4>Paleta de colores</h4>
+        <div class="color-grid">
+          <div v-for="c in colors" :key="prefix + c.key" class="color-pick">
+            <input :id="prefix + '.colorPalette.' + c.key" v-model="flat[prefix + '.colorPalette.' + c.key]" type="color" class="color-input" />
+            <span class="color-label">{{ c.label }}</span>
+            <span class="color-hex">{{ flat[prefix + '.colorPalette.' + c.key] }}</span>
+          </div>
+        </div>
+        <PromptField v-model="flat[prefix + '.prompts.system']" label="Prompt del sistema" :title="name + ' — prompt del sistema'" />
+        <PromptField v-model="flat[prefix + '.prompts.userTemplate']" label="Plantilla de usuario" :title="name + ' — plantilla de usuario'" />
       </div>
-      <PromptField v-model="flat[prefix + '.prompts.system']" label="Prompt del sistema" :title="name + ' — prompt del sistema'" />
-      <PromptField v-model="flat[prefix + '.prompts.userTemplate']" label="Plantilla de usuario" :title="name + ' — plantilla de usuario'" />
-    </div>
+    </CollapsibleSection>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import PromptField from '@/components/shared/PromptField.vue'
-const props = defineProps({ name: { type: String, required: true }, icon: { type: String, default: 'scan' }, prefix: { type: String, required: true }, flat: { type: Object, required: true } })
+import CollapsibleSection from '@/components/config/CollapsibleSection.vue'
+const props = defineProps({
+  name: { type: String, required: true },
+  icon: { type: String, default: 'scan' },
+  prefix: { type: String, required: true },
+  flat: { type: Object, required: true },
+  // Colapsada por defecto para que las cuatro tarjetas de Themis empiecen a la
+  // misma altura: expandir una no debe descolocar a las demás,
+  // así que cada tarjeta abre de forma independiente, no en modo acordeón.
+  defaultOpen: { type: Boolean, default: false },
+})
 const colors = [
   { key: 'black', label: 'Negro' }, { key: 'dark', label: 'Oscuro' }, { key: 'main', label: 'Principal' },
   { key: 'secondary', label: 'Secundario' }, { key: 'light', label: 'Claro' }, { key: 'white', label: 'Blanco' },
@@ -38,7 +52,13 @@ const iconSvg = computed(() => icons[props.icon] || icons.scan)
 
 <style scoped>
 .scanner-card { overflow: hidden; }
-.scanner-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0.85rem; border-bottom: 1px solid var(--border); background: var(--bg); }
+/* El toggle de CollapsibleSection es un componente aparte con CSS scoped
+   propio: :deep() es lo único que permite darle aquí el mismo aspecto de
+   cabecera (fondo, borde inferior, padding) que tenía la cabecera fija antes
+   de que la tarjeta fuera colapsable. */
+:deep(.collapsible-toggle) { padding: 0.75rem 0.85rem; background: var(--bg); border-bottom: 1px solid var(--border); }
+:deep(.collapsible-body) { padding-top: 0; }
+.scanner-header { display: flex; align-items: center; gap: 0.5rem; }
 .scanner-icon { width: 20px; height: 20px; color: var(--accent); flex-shrink: 0; display: flex; }
 .scanner-header h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .scanner-body { padding: 0.85rem; display: flex; flex-direction: column; gap: 0.65rem; }

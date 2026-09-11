@@ -1,6 +1,6 @@
 """
 MailboxConnector — interfaz común para los conectores de buzón externo
-(Gmail, Microsoft Graph), Fase 4 del plan mailbox-connector.
+(Gmail, Microsoft Graph).
 
 Mismo espíritu que ``tools/herald``/``tools/scribe`` (interfaz +
 implementaciones intercambiables), con una diferencia deliberada en cómo se
@@ -41,6 +41,23 @@ class MessageRef:
     # Datos crudos ya disponibles en el listado (si el proveedor los da sin
     # una llamada extra) — evita un round-trip cuando no hace falta.
     raw: dict = field(default_factory=dict)
+
+
+@dataclass
+class MailboxFolder:
+    """Una carpeta/etiqueta real del proveedor que Iris puede vigilar.
+
+    ``provider_id`` es el valor opaco que ``IrisMailboxConnection.folder``
+    guarda y que los conectores usan para filtrar ``list_new`` -- nunca se
+    interpreta ni se recorta, igual que ``sync_cursor``. ``folder_type``
+    distingue una carpeta propia del proveedor ("system": Inbox, Sent,
+    Trash...) de una creada por el usuario ("user": una etiqueta de Gmail,
+    una subcarpeta de Outlook), información que no se puede derivar del
+    nombre por sí solo.
+    """
+    provider_id: str
+    display_name: str
+    folder_type: str  # "system" | "user"
 
 
 class MailboxConnector(ABC):
@@ -84,6 +101,16 @@ class MailboxConnector(ABC):
     @abstractmethod
     def fetch_raw(self, access_token: str, message_ref: MessageRef) -> str:
         """Mensaje MIME crudo completo (solo si full_message_mode)."""
+
+    @abstractmethod
+    def list_folders(self, access_token: str) -> list[MailboxFolder]:
+        """Carpetas/etiquetas reales de la cuenta conectada.
+
+        Única fuente de verdad para validar ``IrisMailboxConnection.folder``:
+        un valor que no aparece aquí no es una carpeta que este proveedor y
+        esta cuenta puedan vigilar, sea porque no existe, porque se escribió
+        a mano, o porque pertenece a otro proveedor.
+        """
 
     @abstractmethod
     def revoke(self, refresh_token: str) -> None:

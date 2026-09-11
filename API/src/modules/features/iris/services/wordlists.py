@@ -1,7 +1,7 @@
 """
 Datasets de detección (marcas, dominios, keywords, extensiones…) compartidos
-entre las reglas de Iris (D6 en plans/deuda-tecnica-y-calidad.md — antes
-mezclado con text.py en un único shared.py de 957 líneas).
+entre las reglas de Iris (antes mezclados con text.py en un único shared.py
+de 957 líneas).
 
 Los datasets se leen de ``SecOpsConfig.json`` (bloque ``features.iris.data.*``)
 a través de ``config_reading.get_iris_data``. Cada dataset tiene un default
@@ -16,8 +16,11 @@ dataset, vive aquí; si necesitan una utilidad de texto/dominio, vive en
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from functools import lru_cache
+from importlib.metadata import version
 from typing import Any
 
 import src.modules.system.config_reading as CR
@@ -28,13 +31,6 @@ import src.modules.system.config_reading as CR
 # =============================================================================
 
 _DEFAULTS: dict[str, Any] = {
-    # Public-suffix de segundo nivel que requieren conservar dos labels
-    # (lista pequeña y pragmática — un PSL completo es excesivo aquí).
-    "multi_level_tlds": [
-        "co.uk", "org.uk", "gov.uk", "ac.uk", "co.jp", "com.mx", "com.br",
-        "com.ar", "com.au", "com.es", "co.in", "co.nz", "com.tr", "com.co",
-    ],
-
     # Marcas canónicas usadas por lookalike/typosquat/subdomain checks.
     "canonical_brands": [
         "microsoft", "paypal", "netflix", "amazon", "google", "apple",
@@ -387,7 +383,7 @@ _DEFAULTS: dict[str, Any] = {
     # de la marca (google.com, sharepoint.com...) pero el path/subdominio
     # es de un usuario cualquiera, así que una página de cosecha de
     # credenciales alojada ahí hoy se salta el chequeo pensado solo para
-    # "es la propia web de la marca" (N3).
+    # "es la propia web de la marca".
     "multitenant_hosting_domains": [
         "docs.google.com", "forms.gle", "forms.office.com", "drive.google.com",
         "sites.google.com", "sharepoint.com", "onedrive.live.com",
@@ -398,7 +394,7 @@ _DEFAULTS: dict[str, Any] = {
 
     # Lenguaje de pago/facturación/suscripción/soporte combinable con un
     # número de teléfono para el patrón TOAD (Telephone-Oriented Attack
-    # Delivery, G-D): "su suscripción se renovó, llame para cancelar" -- sin
+    # Delivery): "su suscripción se renovó, llame para cancelar" -- sin
     # enlaces ni adjuntos, invisible al resto de reglas.
     "toad_phrases": [
         "subscription", "auto-renewal", "auto renewal", "renewal", "renewed",
@@ -427,7 +423,7 @@ def _data(key: str) -> Any:
     return value if value is not None else _DEFAULTS[key]
 
 
-# B18: las cachés se indexan por (versión de configuración, nombre del
+# Las cachés se indexan por (versión de configuración, nombre del
 # dataset), no solo por el nombre.
 #
 # Antes la clave era el nombre a secas y eran permanentes, así que recargar la
@@ -466,10 +462,51 @@ def _tuple_of(key: str) -> tuple[str, ...]:
     return _cached_tuple(CR.config_version(), key)
 
 
-# --- Accessors públicos (uno por dataset) ------------------------------------
+#: Paquetes cuyos datos empaquetados deciden igual que un dataset.
+_FINGERPRINT_PACKAGES = ("publicsuffixlist", "confusable-homoglyphs")
 
-def multi_level_tlds() -> frozenset[str]:
-    return _set_of("multi_level_tlds")
+#: Datasets que viven solo en la configuración (sin default en ``_DEFAULTS``)
+#: y que también cambian el resultado de un análisis.
+_FINGERPRINT_EXTRA_KEYS = ("trusted_authserv_ids",)
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def _datasets_fingerprint(config_version: tuple) -> str:
+    """Huella de los datasets efectivos para una versión de configuración.
+
+    Args:
+        config_version: ``CR.config_version()``; forma parte de la clave de
+            caché por el mismo motivo que en el resto de este módulo.
+
+    Returns:
+        str: ``iris-data:<12 hexadecimales>``.
+    """
+    effective = {key: _data(key) for key in sorted(_DEFAULTS)}
+    for key in _FINGERPRINT_EXTRA_KEYS:
+        effective.setdefault(key, CR.get_iris_data(key))
+    # La Public Suffix List y la tabla de confusables también deciden: una
+    # versión nueva de cualquiera de las dos puede cambiar un veredicto.
+    effective["_packages"] = {package: version(package) for package in _FINGERPRINT_PACKAGES}
+    material = json.dumps(effective, sort_keys=True, ensure_ascii=False, default=list)
+    return "iris-data:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+
+
+def datasets_fingerprint() -> str:
+    """Huella de los datasets de detección con que se evalúa ahora mismo.
+
+    Marcas, proveedores, keywords, TLDs… cambian lo que deciden las reglas tanto
+    como sus pesos. Se calcula sobre los valores **efectivos** (configuración, o
+    el default de este módulo si falta), así que cambia en cuanto cambia lo que
+    ven las reglas, y se cachea por versión de configuración como los propios
+    datasets.
+
+    Returns:
+        str: ``iris-data:<12 hexadecimales>``.
+    """
+    return _datasets_fingerprint(CR.config_version())
+
+
+# --- Accessors públicos (uno por dataset) ------------------------------------
 
 def canonical_brands() -> frozenset[str]:
     return _set_of("canonical_brands")
@@ -566,7 +603,7 @@ def brand_trusted_domains() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ..
 
 
 # =============================================================================
-# MATCHING DE FRASES CON LÍMITES DE PALABRA (B1)
+# MATCHING DE FRASES CON LÍMITES DE PALABRA
 # =============================================================================
 #
 # Los datasets de frases (bec_phrases, credential_phrases, high/low_signal_

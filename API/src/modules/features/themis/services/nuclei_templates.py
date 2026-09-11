@@ -1,15 +1,15 @@
 """El almacén de plantillas de Nuclei — la única copia, con acceso centralizado.
 
 Themis tiene **un solo árbol de plantillas de Nuclei**, y este módulo es su
-única autoridad. La restricción no es estética: con la Fase U1 ya entregada hay
-(o habrá) tres consumidores distintos del mismo árbol, y ninguno debe clonar,
-copiar ni resolver la ruta por su cuenta.
+única autoridad. La restricción no es estética: hay (o habrá) tres
+consumidores distintos del mismo árbol, y ninguno debe clonar, copiar ni
+resolver la ruta por su cuenta.
 
-- ``NucleiScanTask`` (U1/U2) — solo necesita la ruta, para pasársela al binario
+- ``NucleiScanTask`` — solo necesita la ruta, para pasársela al binario
   por ``-templates``. Es el consumidor que ya existía.
-- La ingesta de plantillas al ``CheckRuntime`` propio (Fase R) — necesita
+- La ingesta de plantillas al ``CheckRuntime`` propio — necesita
   *leer* y parsear ese mismo árbol.
-- El censo de ingestibilidad (Fase U4) — necesita medir sobre ese mismo árbol,
+- El censo de ingestibilidad — necesita medir sobre ese mismo árbol,
   y no sobre un clon aparte del repositorio upstream: así el número medido
   corresponde a la versión que de verdad corre en producción.
 

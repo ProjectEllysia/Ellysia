@@ -93,7 +93,7 @@ class MonitoredAsset(Base):
             ``gopsutil``, o cualquier otro valor (incluida una cadena que el
             servidor no reconozca) para "desconocido" — solo el literal
             ``"guest"`` activa el mensaje de máquina virtual de la métrica
-            de potencia (§P29); nunca se valida contra una lista cerrada,
+            de potencia; nunca se valida contra una lista cerrada,
             para que un `gopsutil` más nuevo no rompa la ingesta.
         labels: Etiquetas libres del activo (entorno, rol, ubicación...).
         agent_key_id: Prefijo público de la clave de agente, único e indexado.

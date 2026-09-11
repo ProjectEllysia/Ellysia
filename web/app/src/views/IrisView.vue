@@ -29,9 +29,9 @@
 
           <p class="intake-eyebrow">{{ rejecting ? 'Formato no válido' : 'Intake de evidencia' }}</p>
           <h2 class="intake-title">
-            {{ rejecting ? 'Solo se admiten archivos .eml' : 'Suelta el correo para examinarlo' }}
+            {{ rejecting ? 'Solo se admiten archivos .eml, .msg o un ZIP' : 'Suelta el correo (o varios) para examinarlo' }}
           </h2>
-          <span class="intake-chip">.eml</span>
+          <span class="intake-chip">.eml · .msg · .zip</span>
         </div>
       </div>
     </Transition>
@@ -50,6 +50,8 @@
         @open-archive="archiveOpen = true"
       />
 
+      <IrisBatchPanel :batch="store.currentBatch" @close="store.closeBatch()" @open="store.selectAnalysis" />
+
       <IrisArchiveModal
         :show="archiveOpen"
         @close="archiveOpen = false"
@@ -62,6 +64,18 @@
           <path d="m2 7 10 6 10-6" />
         </svg>
         Conexiones de buzón
+      </router-link>
+      <router-link to="/iris/confianza" class="back-link connections-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        </svg>
+        Remitentes de confianza
+      </router-link>
+      <router-link to="/iris/casos" class="back-link connections-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+        </svg>
+        Casos
       </router-link>
 
       <main class="iris-main">
@@ -80,6 +94,7 @@
               :submitting="store.submitting"
               :prefill="prefill"
               @submit="handleSubmit"
+              @batch="handleBatch"
             />
           </template>
         </IrisReportViewer>
@@ -96,10 +111,11 @@ import IrisHistoryStrip from '@/components/iris/IrisHistoryStrip.vue'
 import IrisArchiveModal from '@/components/iris/IrisArchiveModal.vue'
 import IrisReportViewer from '@/components/iris/IrisReportViewer.vue'
 import IrisForm from '@/components/iris/IrisForm.vue'
+import IrisBatchPanel from '@/components/iris/IrisBatchPanel.vue'
 import { useIrisStore } from '@/stores/irisStore'
 import { useToastStore } from '@/stores/toastStore'
 import { parseEml } from '@/composables/useEml'
-import { classifyIntake, formatByteLimit } from '@/components/iris/intake.js'
+import { classifyIntake, formatByteLimit, isBatchDrop } from '@/components/iris/intake.js'
 
 const store = useIrisStore()
 const toast = useToastStore()
@@ -109,10 +125,10 @@ const archiveOpen = ref(false)
 // Relleno automático del formulario a partir de un .eml arrastrado.
 const prefill = ref(null)
 
-// Fase 2: enviamos el .eml completo (cuerpo, enlaces, adjuntos) para que las
+// Enviamos el .eml completo (cuerpo, enlaces, adjuntos) para que las
 // reglas de contenido puedan analizarlo.
 //
-// B13: el tope ya no se escribe aquí. Era `20 * 1024 * 1024` mientras el
+// El tope ya no se escribe aquí. Era `20 * 1024 * 1024` mientras el
 // backend aplicaba 10 MiB, así que la vista aceptaba ficheros que el API iba
 // a rechazar — después de haberlos leído enteros en memoria. Ahora sale de
 // `GET /iris/capabilities` y la decisión vive en `intake.js`, que es puro y
@@ -160,14 +176,20 @@ async function onDrop(e) {
   e.preventDefault()
   dragDepth.value = 0
 
-  const file = e.dataTransfer?.files?.[0]
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  // Varios ficheros, un ZIP o un .msg van a lote: el servidor decide qué entra.
+  if (isBatchDrop(files)) {
+    await handleBatch(files)
+    return
+  }
+  const file = files[0]
   if (!file) return
 
   const capabilities = await store.fetchCapabilities()
   const intake = classifyIntake(file, capabilities)
   if (!intake.accepted) {
     flashReject()
-    toast.show('Solo se aceptan archivos .eml', 'error')
+    toast.show('Solo se aceptan archivos .eml, .msg o un ZIP', 'error')
     return
   }
 
@@ -181,7 +203,7 @@ async function onDrop(e) {
       return
     }
     // Conservamos el mensaje completo (cuerpo, enlaces, adjuntos) para que
-    // Iris pueda aplicar las reglas de Fase 2; si el archivo se truncó por
+    // Iris pueda aplicar las reglas de contenido; si el archivo se truncó por
     // tamaño, solo enviamos las cabeceras extraídas como respaldo.
     prefill.value = {
       headers: rawHeaders,
@@ -220,6 +242,7 @@ onBeforeUnmount(() => {
   clearTimeout(rejectTimer)
   store.stopPolling()
   store.stopDocumentPolling()
+  store.closeBatch()
   window.removeEventListener('keydown', handleGlobalShortcut)
 })
 
@@ -236,12 +259,18 @@ onMounted(async () => {
   }
 })
 
-async function handleSubmit({ headers, message, title }) {
-  const id = await store.submitAnalysis({ headers, message, title })
+async function handleSubmit(submission) {
+  const id = await store.submitAnalysis(submission)
   if (id) {
     prefill.value = null
     formKey.value++
   }
+}
+
+/** Envía un lote de .eml, .msg o ZIP y deja el panel del lote a la vista. */
+async function handleBatch(files) {
+  if (store.batchSubmitting) return
+  await store.submitBatch(files)
 }
 
 async function handleCancel() {

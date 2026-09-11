@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection
+from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox
 from src.modules.features.iris.repositories import (
-    IrisAnalysisRepository, IrisMailboxConnectionRepository,
+    IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisMailboxInboxRepository,
 )
 from src.modules.infrastructure import UnitOfWork
 
@@ -20,7 +20,7 @@ def _make_connection(user_id: int, account_email: str = "victim@gmail.com") -> I
         provider="gmail",
         account_email=account_email,
         scopes="gmail.metadata",
-        refresh_token_enc="encrypted-token",
+        refresh_token="encrypted-token",
     )
 
 
@@ -102,10 +102,10 @@ def test_analysis_source_message_uid_unique_per_connection(app, regular_user):
             repo.save(IrisAnalysis(raw_headers="From: c@d.com", user_id=regular_user.id))
 
 
-# --------------------------------------------------------------- B12: cursor opaco
+# --------------------------------------------------------------- cursor opaco
 
 def test_sync_cursor_column_has_no_length_limit():
-    """B12: la columna era ``String(255)``, pero el ``@odata.deltaLink`` de
+    """La columna era ``String(255)``, pero el ``@odata.deltaLink`` de
     Microsoft Graph es una URL con un token de estado dentro que la rebasa.
 
     Esta comprobación mira el **tipo declarado**, no un round-trip, a
@@ -148,3 +148,68 @@ def test_a_long_opaque_cursor_survives_a_round_trip(app, regular_user):
             fetched = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
             assert fetched.sync_cursor == cursor
             assert len(fetched.sync_cursor) > 255
+
+
+# --------------------------------------------------------------- IrisMailboxInbox
+
+def test_create_and_fetch_inbox_entry(app, regular_user):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            conn = _make_connection(regular_user.id)
+            IrisMailboxConnectionRepository(uow).save(conn)
+            conn_id = conn.id
+
+        with UnitOfWork() as uow:
+            entry = IrisMailboxInbox(
+                connection_id=conn_id, provider_message_id="msg-1", raw_ref={"foo": "bar"},
+            )
+            IrisMailboxInboxRepository(uow).save(entry)
+            entry_id = entry.id
+
+        with UnitOfWork() as uow:
+            fetched = IrisMailboxInboxRepository(uow).get_by_id(entry_id)
+            assert fetched is not None
+            assert fetched.status == "pending"
+            assert fetched.attempts == 0
+            assert fetched.raw_ref == {"foo": "bar"}
+
+
+def test_inbox_entry_unique_per_connection_and_provider_message(app, regular_user):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            conn = _make_connection(regular_user.id)
+            IrisMailboxConnectionRepository(uow).save(conn)
+            conn_id = conn.id
+
+        with UnitOfWork() as uow:
+            IrisMailboxInboxRepository(uow).save(
+                IrisMailboxInbox(connection_id=conn_id, provider_message_id="msg-1")
+            )
+
+        with pytest.raises(SQLAlchemyError):
+            with UnitOfWork() as uow:
+                IrisMailboxInboxRepository(uow).save(
+                    IrisMailboxInbox(connection_id=conn_id, provider_message_id="msg-1")
+                )
+
+
+def test_deleting_connection_cascades_to_inbox_entries(app, regular_user):
+    """La cola de checkpoint de una conexión borrada no tiene sentido sin
+    ella -- ``ondelete="CASCADE"`` en el FK se encarga."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            conn = _make_connection(regular_user.id)
+            IrisMailboxConnectionRepository(uow).save(conn)
+            conn_id = conn.id
+            IrisMailboxInboxRepository(uow).save(
+                IrisMailboxInbox(connection_id=conn_id, provider_message_id="msg-1")
+            )
+
+        with UnitOfWork() as uow:
+            IrisMailboxConnectionRepository(uow).delete(
+                IrisMailboxConnectionRepository(uow).get_by_id(conn_id)
+            )
+
+        with UnitOfWork() as uow:
+            remaining = IrisMailboxInboxRepository(uow).get_pending(conn_id)
+            assert remaining == []

@@ -1,7 +1,7 @@
 """
 Lybra's own port discovery — the transport layer.
 
-This is the always-available foundation of the roadmap's transport plan: an
+This is the always-available foundation of the transport layer: an
 unprivileged TCP ``connect`` scan built on asyncio. It lets an Lybra scan find
 open ports for itself, so a scan no longer has to be handed the ports from a
 prior Nmap run.
@@ -9,31 +9,29 @@ prior Nmap run.
 Several faster or lower-level techniques are deliberately *not* built here — a
 stateless SYN fast-path, and AIMD (loss-based) rate control. They would need
 raw-socket privileges (``CAP_NET_RAW``), cannot be exercised in this test
-environment, and the roadmap itself treats them as later optimizations to
-reach for only once measured throughput demands them. The connect scan below
-is the base that is always present; a raw path would only ever be a faster
-route to the same result, with Nmap still available as the oracle to check
-against.
+environment, and are later optimizations to reach for only once measured
+throughput demands them. The connect scan below is the base that is always
+present; a raw path would only ever be a faster route to the same result,
+with Nmap still available as the oracle to check against.
 
-**UDP is a separate, smaller story** (Fase N/Ronda 1, roadmap §6.3): a
+**UDP is a separate, smaller story**: a
 "connect scan" is meaningless over a datagram socket, so the only signal
 available without raw sockets is a curated payload/expected-reply pair per
 port — and *that* needs no ``CAP_NET_RAW`` at all, an unprivileged
 ``sendto``/``recvfrom`` (or a connected UDP socket, which is what this module
-uses) suffices. :data:`UDP_PROBES` nació con una sola fila (SNMP en el
-161) y una regla: crece una fila por protocolo que un check o un dissector
-consuma de verdad, no antes de necesitarlo. L22 la cumple — siete filas, cada
-una con su consumidor en ``fingerprinting/udp_services.py``— y con siete el
-barrido pasa a ser concurrente, porque siete plazos de dos segundos en fila
-india son medio minuto de espera contra un host que seguramente no tenga
-ninguno de esos servicios.
+uses) suffices. :data:`UDP_PROBES` crece una fila por protocolo que un check
+o un dissector consuma de verdad, no antes de necesitarlo — hoy son siete,
+cada una con su consumidor en ``fingerprinting/udp_services.py``, y con siete
+el barrido es concurrente, porque siete plazos de dos segundos en fila india
+son medio minuto de espera contra un host que seguramente no tenga ninguno de
+esos servicios.
 
 The event loop is created and torn down entirely inside :func:`scan_ports_sync`
 — the "asyncio island". It lives within a single synchronous worker call and
 never touches the Flask process or an ORM session. The connection opener is
 injectable, so the scanner can be tested without opening real sockets.
 
-**Un barrido vacío y un barrido bloqueado no son lo mismo** (L48-c). Un
+**Un barrido vacío y un barrido bloqueado no son lo mismo**. Un
 objetivo que deja de contestar a mitad de camino —él mismo, o un cortafuegos
 por delante— produce un plazo agotado en cada puerto, y sumarlos daba una
 lista vacía indistinguible de un host genuinamente limpio. Por eso el barrido
@@ -82,7 +80,7 @@ logger = logging.getLogger(__name__)
 
 
 # Maps a well-known TCP port to its conventional service name. Used to label a
-# freshly discovered port before we have a banner for it; fingerprinting (Fase F)
+# freshly discovered port before we have a banner for it; fingerprinting
 # refines the label when it is enabled.
 WELL_KNOWN_PORTS = {
     21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "domain", 80: "http",
@@ -486,8 +484,7 @@ def scan_ports_sync(
     Devuelve ``None`` —no ``[]``— cuando el barrido salió bloqueado o truncado.
     Una lista vacía significa, y sólo significa, "el objetivo contestó y no
     tiene nada abierto"; confundir las dos cosas es lo que hacía que un barrido
-    bloqueado le dijera al usuario que sus vulnerabilidades fueron remediadas
-    (L48-c).
+    bloqueado le dijera al usuario que sus vulnerabilidades fueron remediadas.
 
     Quien sí necesite los resultados parciales de un barrido truncado —el
     motor, que puede reportarlos marcando el escaneo como incompleto— debe
@@ -509,15 +506,14 @@ def services_from_discovered_ports(
 
     A connect (or UDP probe) scan only learns *that* a port answered, not what
     is behind it, so these services carry no product or version —
-    fingerprinting (Fase F/N) fills those in when it runs. Each service is
+    fingerprinting fills those in when it runs. Each service is
     labelled with its well-known name so that, for example, HTTP checks still
     select the right ports.
 
     Args:
         open_ports: The discovered open port numbers.
         protocol: The transport they were discovered over — ``"tcp"`` (the
-            default, and the only value before Fase N/Ronda 1) or ``"udp"``
-            for :func:`scan_udp_ports_sync`'s results.
+            default) or ``"udp"`` for :func:`scan_udp_ports_sync`'s results.
 
     Returns:
         One :class:`Service` per port.
@@ -600,13 +596,9 @@ def build_snmp_get_request(community: str = "public") -> bytes:
 
 
 # Tabla payload→puerto para el descubrimiento UDP. Una fila por protocolo que
-# de verdad tiene un dissector o un check consumiéndolo, que es la regla con la
-# que nació con una sola fila: DNS y NTP se evaluaron y se descartaron entonces
-# porque nada los consumía, no porque no valieran.
-#
-# L22 cumple esa regla en vez de cambiarla: cada fila nueva llega **con su
-# consumidor**, todos en ``fingerprinting/udp_services.py``. Ahí vive la
-# superficie que no aparece en ningún escaneo TCP y que se usa a diario en
+# de verdad tiene un dissector o un check consumiéndolo: cada fila nueva llega
+# **con su consumidor**, todos en ``fingerprinting/udp_services.py``. Ahí vive
+# la superficie que no aparece en ningún escaneo TCP y que se usa a diario en
 # ataques de amplificación — servicios que convierten al host del cliente en
 # arma contra terceros, que es una conversación distinta y más incómoda que
 # "tienes un puerto abierto".
@@ -667,8 +659,7 @@ def scan_udp_ports_sync(  # pylint: disable=too-many-arguments
     "cerrado" — significa "no lo sabemos", así que aquí solo se reportan
     puertos que de verdad contestaron algo.
 
-    **Concurrente desde L22, y por aritmética.** Con una tabla de un puerto un
-    escáner paralelo era andamiaje, y así se dijo. Con siete filas, un
+    **Concurrente por aritmética.** Con siete filas en :data:`UDP_PROBES`, un
     reintento y dos segundos de plazo, el peor caso secuencial son veintiocho
     segundos de espera contra un host que probablemente no tenga ninguno de
     esos servicios. Un hilo por sonda —son siete, no doscientos— lo deja en el
@@ -688,8 +679,8 @@ def scan_udp_ports_sync(  # pylint: disable=too-many-arguments
         retries: Reintentos adicionales tras un primer silencio. Un
             datagrama perdido (no un puerto cerrado) haría que el mismo
             puerto oscilara entre abierto y cerrado entre escaneos, y el
-            ciclo de vida de la Fase 5 lo leería como ``fixed``/``regressed``
-            falsos — de ahí que el valor por defecto no sea 0.
+            ciclo de vida lo leería como ``fixed``/``regressed`` falsos — de
+            ahí que el valor por defecto no sea 0.
         sender: Callable inyectable ``(host, port, payload, timeout) ->
             Optional[bytes]``, espejo del ``opener`` del escáner TCP. Por
             defecto, :func:`udp_send_recv`.
