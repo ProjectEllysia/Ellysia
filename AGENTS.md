@@ -7,4 +7,6 @@ la única fuente de verdad operativa.
 Este fichero existe solo por la convención `AGENTS.md`. No dupliques contenido aquí: dos copias de
 lo mismo derivan, y la que se queda atrás es la que alguien acaba leyendo.
 
-Referencia complementaria: `README.md` (superficie pública de la API, endpoint por endpoint).
+Referencias complementarias: `CONVENCIONES.md` (dónde y cómo se crea cada pieza de código:
+repositorios, managers, servicios, trabajos en segundo plano, constantes y nombres) y `README.md`
+(superficie pública de la API, endpoint por endpoint).
