@@ -165,6 +165,8 @@
         </p>
         <!-- Falso positivo recurrente: confiar en el remitente para los
              próximos análisis. No toca este veredicto. -->
+        <!-- Convertir el informe en trabajo: añadirlo a un caso de analista. -->
+        <IrisAddToCase :analysis-id="reportData.analysisId" :analysis-title="reportData.title || ''" />
         <button v-if="!trustFormOpen" type="button" class="feedback-option trust-open" @click="trustFormOpen = true">
           Confiar en este remitente…
         </button>
@@ -405,6 +407,7 @@ import IrisRuleCard from '@/components/iris/IrisRuleCard.vue'
 import IrisIocsPanel from '@/components/iris/IrisIocsPanel.vue'
 import IrisVerdictHero from '@/components/iris/IrisVerdictHero.vue'
 import IrisTrustForm from '@/components/iris/IrisTrustForm.vue'
+import IrisAddToCase from '@/components/iris/IrisAddToCase.vue'
 
 const { formatDate } = useUtils()
 const irisStore = useIrisStore()
