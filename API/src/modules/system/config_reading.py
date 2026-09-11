@@ -1983,6 +1983,43 @@ def iris_attachment_inspection() -> IrisAttachmentInspection:
     return load_block(IrisAttachmentInspection)
 
 
+@config_block("features.iris.ocr")
+@dataclass(frozen=True)
+class IrisOcrConfig:
+    """OCR local de las imágenes de un correo (regla «Image Text Phishing»).
+
+    El motor es Tesseract, en la propia máquina: ninguna imagen sale a un
+    servicio de terceros. Si el binario no está instalado, la regla se queda
+    neutral.
+    """
+
+    enabled: bool = True
+    """Si se leen las imágenes."""
+
+    languages: str = "spa+eng"
+    """Idiomas de Tesseract separados por ``+``; cada uno necesita su paquete
+    de datos instalado (``tesseract-ocr-spa``…)."""
+
+    max_images: int = 5
+    """Imágenes que se leen como mucho por mensaje: el OCR es lo más caro del
+    análisis."""
+
+    min_image_bytes: int = 2048
+    """Imágenes más pequeñas no se leen: píxeles de seguimiento, iconos y
+    separadores no llevan texto."""
+
+    max_pixels: int = 16_000_000
+    """Píxeles máximos (ancho × alto) de una imagen para leerla; una captura
+    de pantalla grande ronda los 8 millones."""
+
+    timeout_seconds: int = 10
+    """Tiempo máximo del motor por imagen; si se pasa, se mata el proceso."""
+
+
+def iris_ocr_config() -> IrisOcrConfig:
+    return load_block(IrisOcrConfig)
+
+
 # --- Datasets y pesos: buscados por clave, no por campo ---------------------
 #
 # Ninguno de los dos encaja en un bloque: los datasets son dos docenas de listas

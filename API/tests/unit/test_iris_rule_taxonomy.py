@@ -34,6 +34,7 @@ EXPECTED_RULE_IDS = frozenset({
     "iris.content.alarming_keywords", "iris.content.body_content", "iris.content.bec_wire_transfer",
     "iris.content.generic_greeting", "iris.content.url_in_subject", "iris.content.unicode_evasion",
     "iris.content.encoded_word_abuse", "iris.content.toad_callback", "iris.content.list_unsubscribe",
+    "iris.content.image_text_phishing",
     "iris.links.body_links", "iris.links.qr_code_links", "iris.links.compromised_legitimate_domain",
     "iris.links.external_login_link",
     "iris.received.date_header_anomaly", "iris.received.received_chain",

@@ -205,6 +205,7 @@ CONFIG_BLOCKS = [
     (CR.AegisConfig, CR.aegis_config),
     (CR.IrisConfig, CR.iris_config),
     (CR.IrisAttachmentInspection, CR.iris_attachment_inspection),
+    (CR.IrisOcrConfig, CR.iris_ocr_config),
     (CR.ScribeConfig, CR.scribe_config),
     (CR.ScribeResilienceConfig, CR.scribe_resilience_config),
     (CR.HeraldConfig, CR.herald_config),
