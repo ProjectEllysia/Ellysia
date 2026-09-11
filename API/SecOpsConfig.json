@@ -280,6 +280,7 @@
       },
       "legitimateThreshold": 80,
       "suspiciousThreshold": 55,
+      "sensitivityProfile": "balanced",
       "minHeaders": 2,
       "maxMessageBytes": 10485760,
       "maxConnectionsPerUser": 5,

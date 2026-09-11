@@ -108,6 +108,7 @@ def test_a_message_at_the_published_limit_is_accepted(client, regular_user, auth
         min_headers = 2
         legitimate_threshold = 80
         suspicious_threshold = 55
+        sensitivity_profile = "balanced"
 
     monkeypatch.setattr(schemas_mod.CR, "iris_config", lambda: _Limited())
     monkeypatch.setattr(analysis_mod.CR, "iris_config", lambda: _Limited())
@@ -139,6 +140,7 @@ def test_a_message_over_the_published_limit_is_rejected(client, regular_user, au
         min_headers = 2
         legitimate_threshold = 80
         suspicious_threshold = 55
+        sensitivity_profile = "balanced"
 
     monkeypatch.setattr(schemas_mod.CR, "iris_config", lambda: _Limited())
     monkeypatch.setattr(analysis_mod.CR, "iris_config", lambda: _Limited())

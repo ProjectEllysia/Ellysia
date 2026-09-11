@@ -303,6 +303,8 @@ class AnalysisDetailResponseSchema(Schema):
     detectorVersion = fields.String(load_default=None, allow_none=True)
     confidence = fields.String(load_default=None, allow_none=True)
     coverage = fields.Nested(CoverageSchema, load_default=None, allow_none=True)
+    scoringVersion = fields.String(load_default=None, allow_none=True)
+    scoringSnapshot = fields.Dict(load_default=None, allow_none=True)
     uncertaintyReasons = fields.List(fields.String(), load_default=None)
     topSignals = fields.List(fields.Nested(TopSignalSchema), load_default=None)
     aiSummary = fields.Nested(AiSummarySchema, load_default=None, allow_none=True)

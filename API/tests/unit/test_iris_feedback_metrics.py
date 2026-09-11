@@ -9,7 +9,6 @@ catálogo actual clasifica bien las muestras etiquetadas de
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -23,8 +22,6 @@ from src.modules.features.iris.services.feedback_metrics import (
     compute_feedback_metrics,
     outcome_from_rules,
 )
-from src.modules.features.iris.services.parsers import parse_raw_message
-from src.modules.features.iris.services.quality import assess_coverage
 from src.modules.features.iris.services.rules import iris_rules
 
 pytestmark = pytest.mark.unit
@@ -87,25 +84,13 @@ def test_outcome_from_rules_derives_fired_and_covered_families():
 # ------------------------------------------------------------- corpus versionado
 
 def _evaluate(raw: str):
-    """Ejecuta el catálogo sobre *raw* como el motor (sin cola ni base de datos).
+    """Ejecuta el motor real sobre *raw* (sin cola ni base de datos).
 
     Returns:
-        tuple: ``(veredicto, [(regla, score)], reglas sin contenido)``.
+        tuple: ``(veredicto, [(regla, score)], reglas sin evaluar)``.
     """
-    context = parse_raw_message(raw)
-    rules_defs = iris_rules.get_rules()
-    results = []
-    named_results = {}
-    for rule_def in rules_defs:
-        rule_input = context if rule_def.get("needs_context") else context.headers
-        result = rule_def["func"](rule_input)
-        result = replace(result, score=min(0.0, float(result.score)))
-        results.append(result)
-        named_results[rule_def["name"]] = result
-    total_score = IrisManager._aggregate_score(rules_defs, results)
-    verdict, _ = IrisManager._apply_verdict_gates(IrisManager()._determine_verdict(total_score), named_results)
-    rules = [(rule_def["name"], result.score) for rule_def, result in zip(rules_defs, results)]
-    return verdict, rules, assess_coverage(context, rules_defs)["uncoveredRules"]
+    result = IrisManager.evaluate_raw(raw)
+    return result["verdict"], result["rules"], result["unevaluatedRules"]
 
 
 def _corpus():

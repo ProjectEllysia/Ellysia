@@ -9,6 +9,8 @@ import json
 import logging
 import os
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from functools import wraps
@@ -1781,6 +1783,15 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     """Por debajo de ``legitimate_threshold`` y a partir de aquí, Sospechoso;
     por debajo de aquí, Phishing."""
 
+    sensitivity_profile: str = "balanced"
+    """Perfil de sensibilidad: ``strict``, ``balanced`` o ``lenient``.
+
+    Desplaza los dos umbrales de arriba (``strict`` +5, ``lenient`` -5; ver
+    ``iris/services/scoring.py``). Cada análisis guarda el perfil y los
+    umbrales efectivos en su snapshot de puntuación, así que cambiarlo no
+    reinterpreta en silencio los análisis ya hechos. Un valor desconocido se
+    trata como ``balanced``."""
+
     min_headers: int = 2
     """Cabeceras mínimas para considerar analizable un mensaje."""
 
@@ -1913,6 +1924,37 @@ def get_iris_data(key: str):
     return _cfg(f"features.iris.data.{key}")
 
 
+#: Pesos de scoring de Iris que sustituyen a ``features.iris.scoring`` mientras
+#: dura un ``scoring_weight_overrides``. ``None`` fuera de ese bloque.
+_iris_scoring_weight_overrides: ContextVar[Optional[dict]] = ContextVar(
+    "iris_scoring_weight_overrides", default=None,
+)
+
+
+@contextmanager
+def scoring_weight_overrides(overrides: Optional[dict]):
+    """Evalúa con otro mapa de pesos de Iris sin tocar la configuración.
+
+    Es lo que usa el replay para comparar una política candidata con la
+    vigente: dentro del bloque, ``get_iris_scoring_weight`` lee de
+    ``overrides`` en vez de ``features.iris.scoring``. Al ser un
+    ``ContextVar``, no afecta a otros hilos ni a otras peticiones.
+
+    Args:
+        overrides: Mapa ``<regla>.<señal>`` → peso que **sustituye** entero al
+            configurado (una clave ausente usa el default del código). ``None``
+            deja la configuración tal cual.
+
+    Yields:
+        None
+    """
+    token = _iris_scoring_weight_overrides.set(dict(overrides) if overrides is not None else None)
+    try:
+        yield
+    finally:
+        _iris_scoring_weight_overrides.reset(token)
+
+
 @_lazy_load
 def get_iris_scoring_weight(weight_key: str, default: float) -> float:
     """Peso de scoring configurable de una regla de Iris, para recalibrarla.
@@ -1922,8 +1964,26 @@ def get_iris_scoring_weight(weight_key: str, default: float) -> float:
     propio ``default`` que cada llamada pasa (el valor calibrado por el consejo,
     ver STUDY.md) es el que se usa si la clave no está en la config, así que el
     comportamiento no cambia hasta que alguien la añade explícitamente.
+
+    Dentro de un ``scoring_weight_overrides`` se lee de ese mapa en su lugar.
     """
+    overrides = _iris_scoring_weight_overrides.get()
+    if overrides is not None:
+        return float(overrides.get(weight_key, default))
     return _cfg(f"features.iris.scoring.{weight_key}", default, float)
+
+
+@_lazy_load
+def get_iris_scoring_overrides() -> dict:
+    """Pesos de Iris que la configuración sobreescribe (``features.iris.scoring``).
+
+    Es la parte de los pesos que cambia sin desplegar, y por eso entra en el
+    snapshot de puntuación de cada análisis.
+
+    Returns:
+        dict: Copia plana ``<regla>.<señal>`` → peso; vacía si no hay ninguno.
+    """
+    return {key: float(value) for key, value in (_cfg("features.iris.scoring", {}) or {}).items()}
 
 
 # =============================================================================
