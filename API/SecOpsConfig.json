@@ -1049,22 +1049,6 @@
           ".ppam",
           ".sldm"
         ],
-        "multi_level_tlds": [
-          "co.uk",
-          "org.uk",
-          "gov.uk",
-          "ac.uk",
-          "co.jp",
-          "com.mx",
-          "com.br",
-          "com.ar",
-          "com.au",
-          "com.es",
-          "co.in",
-          "co.nz",
-          "com.tr",
-          "com.co"
-        ],
         "redirect_params": [
           "url",
           "u",

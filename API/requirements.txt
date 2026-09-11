@@ -16,6 +16,12 @@ reportlab>=4.0.7
 # transitiva de reportlab.
 Pillow>=11.0.0
 
+# Iris: dominio registrable según la Public Suffix List (empaquetada; no se
+# descarga en ejecución) y tabla de confusables de Unicode para distinguir un
+# dominio internacionalizado legítimo de un homógrafo.
+publicsuffixlist>=1.0.2
+confusable-homoglyphs>=3.3.1
+
 # QR code decoding (Iris quishing detection, D1)
 opencv-python-headless>=4.10.0
 

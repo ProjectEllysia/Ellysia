@@ -31,14 +31,15 @@ import re
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..wordlists import (
-    brand_trusted_domains, canonical_brands, multi_level_tlds,
+    brand_trusted_domains, canonical_brands,
     subdomain_action_words, suspicious_tlds,
 )
 from ..text import (
     extract_display_name, extract_domain, is_free_provider,
     is_plausible_typo, levenshtein, normalize_homoglyphs,
-    registrable_domain, registrable_label,
+    public_suffix, registrable_domain, registrable_label,
 )
+from ..idn import IdnVerdict, assess_domain, skeleton, to_unicode
 from ..parsers import decode_mime_words
 
 
@@ -264,19 +265,32 @@ def check_lookalike_domain(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
-    # Punycode / IDN homograph — any xn-- label is inherently suspicious.
-    if any(label.startswith("xn--") for label in domain.split(".")):
+    # Un IDN (``xn--``) solo es sospechoso si imita una marca o mezcla
+    # alfabetos; uno legítimo de un solo alfabeto sigue el análisis normal,
+    # sobre su esqueleto visual.
+    idn = assess_domain(domain, canonical_brands())
+    if idn.is_suspicious:
+        is_homograph = idn.verdict == IdnVerdict.BRAND_HOMOGRAPH
         return RuleResult(
             score=CR.get_iris_scoring_weight("lookalike_domain.punycode", -15), verdict="fail",
-            details={"domain": domain, "type": "punycode"},
+            details={
+                "domain": domain, "unicode_domain": idn.unicode_domain,
+                "type": "idn_homograph" if is_homograph else "idn_mixed_script",
+                "label": idn.label, "scripts": list(idn.scripts), "brand": idn.brand,
+            },
             recommendation=(
-                f"El dominio del remitente ({domain}) usa codificación punycode (IDN, 'xn--'). "
-                "Es una técnica habitual para registrar dominios que parecen marcas conocidas "
-                "usando caracteres Unicode visualmente idénticos. Trátalo como phishing."
+                f"El dominio del remitente ({domain}, que se lee «{idn.unicode_domain}») "
+                + (f"usa caracteres de otro alfabeto que se ven igual que «{idn.brand}». "
+                   if is_homograph else
+                   f"mezcla alfabetos en una misma palabra ({', '.join(idn.scripts)}), algo que "
+                   "ningún idioma hace. ")
+                + "Es la técnica de homógrafos IDN para suplantar dominios. Trátalo como phishing."
             ),
         )
 
     label = registrable_label(domain)
+    if idn.verdict == IdnVerdict.VALID_IDN:
+        label = skeleton(to_unicode(label))
     if not label:
         return RuleResult(score=1, verdict="pass", details={"domain": domain}, recommendation=None)
 
@@ -346,13 +360,15 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
     if _is_trusted_brand_domain(domain):
         return RuleResult(score=1, verdict="pass", details={"domain": domain}, recommendation=None)
 
-    if "xn--" in domain:
+    idn = assess_domain(domain, canonical_brands())
+    if idn.is_suspicious:
         return RuleResult(
             score=CR.get_iris_scoring_weight("subdomain_impersonation.punycode", -10), verdict="fail",
-            details={"domain": domain, "type": "punycode_in_subdomain"},
+            details={"domain": domain, "unicode_domain": idn.unicode_domain,
+                     "type": "punycode_in_subdomain", "idn_verdict": idn.verdict.value, "brand": idn.brand},
             recommendation=(
-                f"El dominio {domain} usa codificación punycode. Combinado con la "
-                "imposible coincidencia con un subdominio, es muy probable phishing."
+                f"El dominio {domain} (se lee «{idn.unicode_domain}») usa caracteres Unicode "
+                "que imitan otro nombre o mezclan alfabetos. Es muy probable phishing."
             ),
         )
 
@@ -364,8 +380,10 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
     if reg_label in brands:
         return RuleResult(score=0, verdict="neutral", details={"domain": domain}, recommendation=None)
 
-    pre_labels = [label for label in labels[:-2] if label] if ".".join(labels[-2:]) in multi_level_tlds() \
-        else [label for label in labels[:-1] if label]
+    # Todas las etiquetas salvo el sufijo público: los subdominios más la
+    # registrable.
+    suffix_length = len(public_suffix(domain).split("."))
+    pre_labels = [label for label in labels[:-suffix_length] if label]
 
     findings: list[dict] = []
 
