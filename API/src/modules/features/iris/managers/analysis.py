@@ -90,6 +90,51 @@ _VERDICT_SEVERITY = {v: i for i, v in enumerate(_VERDICT_ORDER)}
 
 
 
+def _rule_to_dict(rule: IrisRuleResult) -> Dict[str, Any]:
+    """Serializa una fila de regla con las claves camelCase de la API.
+
+    Args:
+        rule: Fila ``IrisRuleResult`` persistida.
+
+    Returns:
+        dict: ``ruleName``, ``category``, ``score``, ``verdict``,
+            ``details``, ``recommendation``, ``evidence`` (lista, vacía si
+            no hay) y ``evidenceUnavailableReason``.
+    """
+    return {
+        "ruleName": rule.rule_name,
+        "category": rule.category,
+        "score": rule.score,
+        "verdict": rule.verdict,
+        "details": rule.details,
+        "recommendation": rule.recommendation,
+        "evidence": rule.evidence or [],
+        "evidenceUnavailableReason": rule.evidence_unavailable_reason,
+    }
+
+
+def _winning_message_context(analysis: IrisAnalysis):
+    """Parsea el raw del análisis y devuelve el contexto que ganó.
+
+    Las vistas derivadas del raw (cadena Received, IOCs) tienen que
+    describir el mismo mensaje que el veredicto: en un reenvío cuyo
+    envoltorio fue más grave, el envoltorio.
+
+    Args:
+        analysis: Análisis ya cargado y con su propiedad comprobada.
+
+    Returns:
+        MessageContext: El contexto ganador (el interno si el análisis no
+            guardó ninguno).
+
+    Raises:
+        IrisRawMessagePurgedError: La retención ya purgó el raw.
+    """
+    if analysis.raw_headers is None:
+        raise IrisRawMessagePurgedError(analysis.id)
+    return context_of_type(parse_raw_message(analysis.raw_headers), analysis.winning_context)
+
+
 class IrisManager(TaskTrackingMixin):
     """Orchestrates the lifecycle of an Iris email-header analysis.
 
@@ -370,7 +415,7 @@ class IrisManager(TaskTrackingMixin):
         # Un análisis sin contexto ganador guardado solo tiene filas del
         # contexto que ganó, sin marcar: se leen todas, como siempre.
         rules = rule_repo.get_by_analysis(analysis_id, context_type=analysis.winning_context)
-        rules_data = [self._rule_to_dict(rule) for rule in rules]
+        rules_data = [_rule_to_dict(rule) for rule in rules]
 
         recommendations = [
             rule["recommendation"] for rule in rules_data
@@ -384,7 +429,7 @@ class IrisManager(TaskTrackingMixin):
             )
             secondary_context = {
                 **analysis.secondary_context,
-                "rules": [self._rule_to_dict(rule) for rule in secondary_rules],
+                "rules": [_rule_to_dict(rule) for rule in secondary_rules],
             }
 
         from src.modules.users import UserManager
@@ -439,29 +484,6 @@ class IrisManager(TaskTrackingMixin):
             "rules": rules_data,
             "recommendations": recommendations,
             "latestFeedback": latest_feedback,
-        }
-
-    @staticmethod
-    def _rule_to_dict(rule: IrisRuleResult) -> Dict[str, Any]:
-        """Serializa una fila de regla con las claves camelCase de la API.
-
-        Args:
-            rule: Fila ``IrisRuleResult`` persistida.
-
-        Returns:
-            dict: ``ruleName``, ``category``, ``score``, ``verdict``,
-                ``details``, ``recommendation``, ``evidence`` (lista, vacía si
-                no hay) y ``evidenceUnavailableReason``.
-        """
-        return {
-            "ruleName": rule.rule_name,
-            "category": rule.category,
-            "score": rule.score,
-            "verdict": rule.verdict,
-            "details": rule.details,
-            "recommendation": rule.recommendation,
-            "evidence": rule.evidence or [],
-            "evidenceUnavailableReason": rule.evidence_unavailable_reason,
         }
 
     @classmethod
@@ -537,34 +559,13 @@ class IrisManager(TaskTrackingMixin):
                 aquí no hay ningún raw que parsear, ni cabeceras.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
-        context = self._winning_message_context(analysis)
+        context = _winning_message_context(analysis)
         return {
             "analysisId": analysis.id,
             "contextType": analysis.winning_context,
             **build_path(context.received_headers),
         }
 
-    @staticmethod
-    def _winning_message_context(analysis: IrisAnalysis):
-        """Parsea el raw del análisis y devuelve el contexto que ganó.
-
-        Las vistas derivadas del raw (cadena Received, IOCs) tienen que
-        describir el mismo mensaje que el veredicto: en un reenvío cuyo
-        envoltorio fue más grave, el envoltorio.
-
-        Args:
-            analysis: Análisis ya cargado y con su propiedad comprobada.
-
-        Returns:
-            MessageContext: El contexto ganador (el interno si el análisis no
-                guardó ninguno).
-
-        Raises:
-            IrisRawMessagePurgedError: La retención ya purgó el raw.
-        """
-        if analysis.raw_headers is None:
-            raise IrisRawMessagePurgedError(analysis.id)
-        return context_of_type(parse_raw_message(analysis.raw_headers), analysis.winning_context)
 
     
 
@@ -594,7 +595,7 @@ class IrisManager(TaskTrackingMixin):
                 análisis.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
-        context = self._winning_message_context(analysis)
+        context = _winning_message_context(analysis)
 
         domains: set[str] = set()
         emails: set[str] = set()

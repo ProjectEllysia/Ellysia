@@ -47,6 +47,14 @@ from sqlalchemy.orm import Session
 
 # Re-exported for backward compatibility with the ~20 modules that import the
 # engine/session helpers from here. The definitions live in engine.py now.
+from .engine import (  # noqa: F401
+    ENGINE,
+    SESSION_FACTORY,
+    initialize,
+    get_session,
+    warmup,
+    close_all,
+)
 from .session import get_db_session
 
 logger = logging.getLogger(__name__)
