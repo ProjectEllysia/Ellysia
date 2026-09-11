@@ -366,23 +366,30 @@ class IrisPDFCreator:
         se resalta porque una discrepancia entre ambos es una señal clásica
         de fraude BEC (el atacante quiere que las respuestas vayan a un
         buzón distinto del remitente que se ve a simple vista).
+
+        Las cabeceras salen de ``previewHeaders``, que el manager toma del
+        contexto que produjo el veredicto; si el informe no las trae (un
+        informe construido a mano), se leen del raw.
         """
-        raw = self.report.get("rawHeaders")
-        if not raw:
-            return
+        preview = self.report.get("previewHeaders")
+        if preview is None:
+            raw = self.report.get("rawHeaders")
+            if not raw:
+                return
+            headers = parse_raw_headers(raw)
+            preview = {
+                key: (decode_mime_words(headers[name]) if headers.get(name) else None)
+                for name, key in (("subject", "subject"), ("from", "from"), ("to", "to"),
+                                  ("reply-to", "replyTo"), ("return-path", "returnPath"),
+                                  ("date", "date"))
+            }
 
-        headers = parse_raw_headers(raw)
-
-        def _get(name: str) -> Optional[str]:
-            value = headers.get(name)
-            return decode_mime_words(value) if value else None
-
-        subject = _get("subject")
-        from_ = _get("from")
-        to_address = _get("to")
-        reply_to = _get("reply-to")
-        return_path = _get("return-path")
-        date = _get("date")
+        subject = preview.get("subject")
+        from_ = preview.get("from")
+        to_address = preview.get("to")
+        reply_to = preview.get("replyTo")
+        return_path = preview.get("returnPath")
+        date = preview.get("date")
 
         if not any([subject, from_, to_address, reply_to, return_path, date]):
             return
@@ -446,12 +453,24 @@ class IrisPDFCreator:
             elements.append(Spacer(1, 0.1 * inch))
             wrapper_from = self.report.get("wrapperFrom")
             wrapper_subject = self.report.get("wrapperSubject")
-            note = "Este análisis corresponde al correo original reenviado"
+            if self.report.get("winningContext") == "wrapper":
+                note = "Este análisis corresponde al envoltorio del reenvío"
+            else:
+                note = "Este análisis corresponde al correo original reenviado"
             if wrapper_from:
                 note += f" por {_esc(wrapper_from)}"
             if wrapper_subject:
                 note += f" (asunto del reenvío: «{_esc(wrapper_subject)}»)"
             note += "."
+            winning_reason = self.report.get("winningReason")
+            if winning_reason:
+                note += f" {_esc(winning_reason)}"
+            secondary = self.report.get("secondaryContext")
+            if secondary:
+                note += (
+                    f" El otro mensaje ({'envoltorio' if secondary.get('contextType') == 'wrapper' else 'original'})"
+                    f" obtuvo {_esc(secondary.get('verdict'))} con {_esc(secondary.get('totalScore'))} puntos."
+                )
             elements.append(Paragraph(note, theme.body))
 
         elements.append(Spacer(1, 0.22 * inch))

@@ -679,7 +679,7 @@ def test_aggregate_score_floored_at_zero():
 
 def _iocs_for(monkeypatch, raw_message):
     from types import SimpleNamespace
-    fake_analysis = SimpleNamespace(id=42, raw_headers=raw_message)
+    fake_analysis = SimpleNamespace(id=42, raw_headers=raw_message, winning_context=None)
     monkeypatch.setattr(
         IrisManager, "assert_analysis_ownership",
         classmethod(lambda cls, analysis_id, user_id: fake_analysis),

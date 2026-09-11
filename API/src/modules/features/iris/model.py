@@ -61,6 +61,18 @@ class IrisAnalysis(Base):
         detector_version: Marca del catálogo de reglas que produjo el
                  resultado (``iris-rules:<n>:<hash>``). Sin ella, un informe
                  guardado deja de ser interpretable cuando el catálogo cambia.
+        winning_context: Qué mensaje produjo el veredicto: "inner" (el
+                 original desenvuelto de un reenvío, o el único mensaje si no
+                 lo era) o "wrapper" (el envoltorio del reenvío, cuando es más
+                 grave que el original). NULL en análisis anteriores a que se
+                 guardara, que se leen como "inner". Ver
+                 ``services/contexts.py``.
+        winning_reason: Frase legible que explica por qué ganó ese contexto;
+                 NULL cuando el mensaje no era un reenvío.
+        secondary_context: Resumen del contexto que perdió en un reenvío
+                 (``contextType``, ``verdict``, ``totalScore``,
+                 ``analysisQuality``); NULL cuando no hubo reenvío. Sus
+                 reglas están en ``IrisRuleResult`` con su ``context_type``.
         failure_code: Why a ``failed`` analysis failed — "invalid_input"
                  (the submitted text is not an analysable message) or
                  "internal_error" (the pipeline broke). NULL for every
@@ -116,6 +128,9 @@ class IrisAnalysis(Base):
     analysis_quality = Column(String(16), nullable=True)
     failed_rules = Column(JSONB, nullable=True)
     detector_version = Column(String(64), nullable=True)
+    winning_context = Column(String(16), nullable=True)
+    winning_reason = Column(Text, nullable=True)
+    secondary_context = Column(JSONB, nullable=True)
     failure_code = Column(String(32), nullable=True)
     failure_reason = Column(Text, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
@@ -447,7 +462,13 @@ class IrisRuleResult(Base):
         details: JSONB blob with rule-specific findings and evidence.
         recommendation: Human-readable advice for the user when the
                         rule flagged a problem; null if the rule passed.
-        position: Execution order (0-based) within the analysis.
+        position: Execution order (0-based) within its context.
+        context_type: Qué mensaje evaluó esta fila: "inner" o "wrapper" (ver
+                        ``IrisAnalysis.winning_context``). En un reenvío se
+                        guardan las reglas de los dos contextos; el informe
+                        muestra las del ganador y deja las otras como
+                        contexto secundario. NULL en filas anteriores a que se
+                        guardara, que solo existían para el contexto ganador.
         analysis: SQLAlchemy back-reference to the parent IrisAnalysis.
     """
     __tablename__ = "IrisRuleResult"
@@ -461,6 +482,7 @@ class IrisRuleResult(Base):
     details = Column(JSONB, nullable=True)
     recommendation = Column(Text, nullable=True)
     position = Column(SmallInteger, nullable=False, default=0)
+    context_type = Column(String(16), nullable=True)
 
     analysis = relationship("IrisAnalysis", back_populates="rule_results")
 

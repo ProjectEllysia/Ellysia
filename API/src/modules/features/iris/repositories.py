@@ -496,14 +496,25 @@ class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
 
     _MODEL = IrisRuleResult
 
-    def get_by_analysis(self, analysis_id: int) -> List[IrisRuleResult]:
-        """Return all rule results for an analysis, ordered by position."""
-        return (
-            self._session.query(IrisRuleResult)
-            .filter(IrisRuleResult.analysis_id == analysis_id)
-            .order_by(IrisRuleResult.position)
-            .all()
+    def get_by_analysis(self, analysis_id: int,
+                        context_type: Optional[str] = None) -> List[IrisRuleResult]:
+        """Filas de regla de un análisis, ordenadas por posición.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis``.
+            context_type: Si se da (``"inner"`` o ``"wrapper"``), solo las
+                filas de ese contexto del reenvío. Por defecto ``None``:
+                todas las filas, de cualquier contexto.
+
+        Returns:
+            List[IrisRuleResult]: Las filas pedidas; lista vacía si no hay.
+        """
+        query = self._session.query(IrisRuleResult).filter(
+            IrisRuleResult.analysis_id == analysis_id
         )
+        if context_type is not None:
+            query = query.filter(IrisRuleResult.context_type == context_type)
+        return query.order_by(IrisRuleResult.position).all()
 
     def delete_by_analysis(self, analysis_id: int) -> None:
         """Delete all rule results belonging to an analysis."""

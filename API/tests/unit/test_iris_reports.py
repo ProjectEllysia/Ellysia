@@ -206,3 +206,53 @@ def test_raw_headers_dump_is_not_redacted_when_disabled_in_config():
         rendered = _rendered_raw_headers_text(report)
 
     assert "bystander@example.com" in rendered
+
+
+# ------------------------------------------------ contexto ganador de un reenvío
+
+def _rendered_preview_text(report: dict) -> str:
+    """Llama a append_email_preview() y concatena el texto de los Paragraph,
+    tanto sueltos como dentro de las celdas de la tabla de vista previa."""
+    creator = IrisPDFCreator(report=report)
+    elements: list = []
+    creator.append_email_preview(elements, _theme())
+    texts = []
+    for element in elements:
+        if hasattr(element, "text"):
+            texts.append(element.text)
+        for row in getattr(element, "_cellvalues", []):
+            for cell in row:
+                texts.append(cell.text if hasattr(cell, "text") else str(cell))
+    return "\n".join(texts)
+
+
+def test_preview_uses_the_winning_context_headers_over_the_raw():
+    """La vista previa describe el mensaje que produjo el veredicto, aunque
+    el raw empiece por las cabeceras de otro."""
+    report = _sample_report(
+        rawHeaders="From: original@corp.example\nSubject: Original\n",
+        previewHeaders={"subject": "FW: revisa esto", "from": "alerta@evil.example",
+                        "to": None, "replyTo": None, "returnPath": None, "date": None},
+    )
+    text = _rendered_preview_text(report)
+    assert "alerta@evil.example" in text
+    assert "FW: revisa esto" in text
+    assert "original@corp.example" not in text
+
+
+def test_preview_note_says_the_wrapper_won_and_summarises_the_original():
+    report = _sample_report(
+        unwrappedFromForward=True, wrapperFrom="alerta@evil.example",
+        winningContext="wrapper",
+        winningReason="El envoltorio del reenvío (Phishing) es más grave.",
+        secondaryContext={"contextType": "inner", "verdict": "Legitimate", "totalScore": 100.0},
+    )
+    text = _rendered_preview_text(report)
+    assert "envoltorio del reenvío" in text
+    assert "El otro mensaje (original) obtuvo Legitimate" in text
+
+
+def test_preview_note_says_the_original_won_by_default():
+    report = _sample_report(unwrappedFromForward=True, wrapperFrom="colega@corp.example")
+    text = _rendered_preview_text(report)
+    assert "correo original reenviado" in text
