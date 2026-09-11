@@ -17,7 +17,7 @@ import json
 import logging
 import os
 
-from flask import redirect, send_file, Response
+from flask import redirect, request, send_file, Response
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.users import (
@@ -37,7 +37,7 @@ import src.modules.system.config_reading as CR
 from .managers import (
     IrisFeedbackManager, IrisManager, IrisReportManager, IrisMailboxManager,
     IrisNotificationPreferenceManager, IrisReplayManager, IrisTriageManager, IrisTrustPolicyManager,
-    IrisCaseManager,
+    IrisCaseManager, IrisBatchManager,
 )
 from .exceptions import (
     IrisAnalysisNotFoundError,
@@ -45,6 +45,7 @@ from .exceptions import (
     IrisInvalidInputError,
     IrisMailboxConnectionNotFoundError,
     IrisMailboxOAuthStateError,
+    IrisBatchNotFoundError,
     IrisCaseNotFoundError,
     IrisSavedViewNotFoundError,
     IrisTrustedSenderNotFoundError,
@@ -110,6 +111,8 @@ from .schemas import (
     IrisCaseStatusRequestSchema,
     IrisCasesQuerySchema,
     IrisCaseUpdateRequestSchema,
+    IrisBatchListResponseSchema,
+    IrisBatchResponseSchema,
 )
 
 
@@ -180,6 +183,51 @@ def analyze_headers(data):
         "analysisId": analysis_id,
         "status": "pending",
     }
+
+
+@iris_blp.post("/analyze/batch")
+@iris_blp.response(201, IrisBatchResponseSchema, description="Batch accepted: summary and one item per message")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Empty batch or over the batch limits")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(429, schema=ErrorSchema, description="Too many analyses in flight; nothing was created")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
+@limiter.limit("10 per hour; 50 per day")
+@handle_exceptions(default_exception=IrisExecutionError, logger=logger)
+def analyze_batch():
+    """Analizar varios .eml o un ZIP de una vez (campo multipart «files», repetible)"""
+    # Los flujos se pasan sin leer: el manager los lee con tope, para no cargar
+    # en memoria más de lo que admite un lote.
+    uploads = [(storage.filename or "", storage.stream) for storage in request.files.getlist("files")]
+    return IrisBatchManager().submit_batch(get_current_user().id, uploads)
+
+
+@iris_blp.get("/batches")
+@iris_blp.response(200, IrisBatchListResponseSchema, description="Recent batches")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(logger=logger)
+def list_batches():
+    """Lotes recientes del usuario"""
+    return IrisBatchManager().list_batches(get_current_user().id)
+
+
+@iris_blp.get("/batches/<int:batch_id>")
+@iris_blp.response(200, IrisBatchResponseSchema, description="Batch with each analysis' current status")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Batch not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("600 per hour; 4000 per day")
+@handle_exceptions(default_exception=IrisBatchNotFoundError, logger=logger)
+def get_batch(batch_id: int):
+    """Un lote con el estado actual de cada análisis (para sondear el progreso)"""
+    return IrisBatchManager().get_batch(batch_id, get_current_user().id)
 
 
 @iris_blp.get("/capabilities")

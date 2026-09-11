@@ -48,6 +48,7 @@ from ..repositories import (
     IrisIndicatorRepository,
     IrisRuleResultRepository,
 )
+from ..services.batch import message_fingerprint
 from ..services.indicators import extract_indicators, indicator_rows, refang
 from ..services.rules import iris_rules, RuleResult
 from ..services.text import extract_domain, is_free_provider, url_host
@@ -273,6 +274,7 @@ class IrisManager(TaskTrackingMixin):
             status="pending",
             connection_id=connection_id,
             source_message_uid=source_message_uid,
+            content_sha256=message_fingerprint(raw_input),
         )
         try:
             with UnitOfWork() as uow:

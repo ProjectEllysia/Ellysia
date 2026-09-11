@@ -21,7 +21,7 @@ from .model import (
     IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisNotificationPreference,
     IrisRawMessage, IrisRuleResult, IrisDocument, IrisTrustedSender,
     IrisAnalysisTag, IrisIndicator, IrisSavedView,
-    IrisCase, IrisCaseAnalysis, IrisCaseEvent,
+    IrisCase, IrisCaseAnalysis, IrisCaseEvent, IrisBatch, IrisBatchItem,
 )
 
 
@@ -156,6 +156,39 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
                 IrisAnalysis.source_message_uid == source_message_uid,
             )
             .first()
+        )
+
+    def get_by_user_and_fingerprint(self, user_id: int, fingerprint: str) -> Optional[IrisAnalysis]:
+        """El análisis más reciente de un usuario con esta huella de contenido.
+
+        Args:
+            user_id: Dueño de los análisis.
+            fingerprint: ``IrisAnalysis.content_sha256`` buscada.
+
+        Returns:
+            Optional[IrisAnalysis]: El análisis, o ``None`` si ese mensaje no se
+                ha analizado nunca (o solo antes de que existiera la huella).
+        """
+        return (
+            self._session.query(IrisAnalysis)
+            .filter(IrisAnalysis.user_id == user_id, IrisAnalysis.content_sha256 == fingerprint)
+            .order_by(IrisAnalysis.id.desc())
+            .first()
+        )
+
+    def count_active_by_user(self, user_id: int) -> int:
+        """Cuántos análisis de un usuario están pendientes o en curso.
+
+        Args:
+            user_id: Dueño de los análisis.
+
+        Returns:
+            int: Análisis en ``pending`` o ``running``.
+        """
+        return (
+            self._session.query(IrisAnalysis.id)
+            .filter(IrisAnalysis.user_id == user_id, IrisAnalysis.status.in_(["pending", "running"]))
+            .count()
         )
 
     def exists_by_source(self, connection_id: int, source_message_uid: str) -> bool:
@@ -932,6 +965,40 @@ class IrisCaseEventRepository(BaseRepository[IrisCaseEvent]):
     """
 
     _MODEL = IrisCaseEvent
+
+
+class IrisBatchRepository(BaseRepository[IrisBatch]):
+    """Acceso a los lotes de mensajes (``IrisBatch``)."""
+
+    _MODEL = IrisBatch
+
+    def get_recent_by_user(self, user_id: int, limit: int) -> List[IrisBatch]:
+        """Lotes más recientes de un usuario.
+
+        Args:
+            user_id: Dueño de los lotes.
+            limit: Cuántos como máximo.
+
+        Returns:
+            List[IrisBatch]: Del más nuevo al más antiguo, con sus elementos cargados.
+        """
+        return (
+            self._session.query(IrisBatch)
+            .options(selectinload(IrisBatch.items))
+            .filter(IrisBatch.user_id == user_id)
+            .order_by(IrisBatch.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+
+class IrisBatchItemRepository(BaseRepository[IrisBatchItem]):
+    """Acceso a los elementos de los lotes (``IrisBatchItem``).
+
+    Se leen a través de ``IrisBatch.items``; aquí solo se guardan.
+    """
+
+    _MODEL = IrisBatchItem
 
 
 class IrisReportRepository(DocumentRepository[IrisDocument]):

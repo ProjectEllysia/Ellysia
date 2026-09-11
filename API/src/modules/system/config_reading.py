@@ -1832,6 +1832,21 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     vez acota el coste de ese re-parseo.
     """
 
+    batch_max_items: int = 50
+    """Mensajes como máximo en un lote de ``POST /iris/analyze/batch``,
+    contando los que se rechazan. Un lote que se pasa se rechaza entero."""
+
+    batch_max_total_bytes: int = 50 * 1024 * 1024
+    """Suma máxima de los mensajes analizables de un lote (y tamaño máximo
+    de cada fichero subido, un ZIP incluido). Un lote que se pasa se rechaza
+    entero."""
+
+    max_active_analyses_per_user: int = 100
+    """Análisis pendientes o en curso que puede tener un usuario a la vez
+    cuando envía un lote. Es el freno que impide que un lote llene la cola:
+    si lo superaría, el lote se rechaza entero con un 429 y el usuario
+    vuelve a enviarlo cuando terminen los que tiene en marcha."""
+
     max_connections_per_user: int = 5
     """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
 

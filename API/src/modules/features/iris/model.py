@@ -101,6 +101,11 @@ class IrisAnalysis(Base):
                  y ``modulatedRules``. Se guarda aunque la excepción se
                  revoque después: es la auditoría de por qué este veredicto es
                  el que es. NULL si ninguna excepción coincidió.
+        content_sha256: Huella SHA-256 del texto analizado (ver
+                 ``services/batch.message_fingerprint``). Reconoce el mismo
+                 correo enviado otra vez, en un lote o suelto, para no
+                 analizarlo ni cobrarlo dos veces. NULL en análisis
+                 anteriores a que se calculara.
         failure_code: Why a ``failed`` analysis failed — "invalid_input"
                  (the submitted text is not an analysable message) or
                  "internal_error" (the pipeline broke). NULL for every
@@ -176,6 +181,7 @@ class IrisAnalysis(Base):
     secondary_context = Column(JSONB, nullable=True)
     trust_applied = Column(JSONB, nullable=True)
     failure_code = Column(String(32), nullable=True)
+    content_sha256 = Column(String(64), nullable=True)
     failure_reason = Column(Text, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
     ai_summary_status = Column(String(16), nullable=True)
@@ -235,6 +241,7 @@ class IrisAnalysis(Base):
         Index("ix_iris_analysis_status", "status"),
         Index("ix_iris_analysis_verdict", "verdict"),
         Index("ix_iris_analysis_connection_id", "connection_id"),
+        Index("ix_iris_analysis_user_fingerprint", "user_id", "content_sha256"),
     )
 
     @property
@@ -1011,4 +1018,82 @@ class IrisCaseEvent(Base):
 
     __table_args__ = (
         Index("ix_iris_case_event_case_id", "case_id"),
+    )
+
+
+class BatchItemStatus(StrEnum):
+    """Qué pasó con un mensaje de un lote (``IrisBatchItem.status``).
+
+    Attributes:
+        CREATED: Se creó su análisis.
+        DUPLICATE: Ya estaba en el lote o ya se había analizado; apunta al
+            análisis existente.
+        REJECTED: No se intentó analizar (no es un ``.eml``, pasa del tamaño…).
+        FAILED: Se intentó y falló (no es un correo analizable, sin cuota…).
+    """
+    CREATED = "created"
+    DUPLICATE = "duplicate"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class IrisBatch(Base):
+    """Un lote de mensajes enviado de una vez (``POST /iris/analyze/batch``).
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` que lo envió; ``ondelete="CASCADE"``.
+        total: Mensajes del lote, contando rechazados y repetidos.
+        created_at: Cuándo se envió.
+        items: Un elemento por mensaje, en el orden en que llegaron.
+    """
+    __tablename__ = "IrisBatch"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
+    total = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    user = relationship("User")
+    items = relationship(
+        "IrisBatchItem", back_populates="batch",
+        order_by="IrisBatchItem.position",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_iris_batch_user_id", "user_id"),
+    )
+
+
+class IrisBatchItem(Base):
+    """Un mensaje de un lote y lo que pasó con él.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        batch_id: FK al ``IrisBatch``; ``ondelete="CASCADE"``.
+        position: Orden del mensaje en el lote (0 es el primero).
+        filename: Nombre del ``.eml``; dentro de un ZIP, ``zip/ruta``.
+        status: ``BatchItemStatus``.
+        analysis_id: FK al ``IrisAnalysis`` creado o al que repite;
+                 ``ondelete="SET NULL"``, así que borrar el análisis no
+                 borra el rastro del lote. NULL si se rechazó o falló.
+        error: Por qué se rechazó o falló; NULL en los demás.
+        batch / analysis: Relaciones.
+    """
+    __tablename__ = "IrisBatchItem"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    batch_id = Column(Integer, ForeignKey("IrisBatch.id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False)
+    filename = Column(String(255), nullable=False)
+    status = Column(String(16), nullable=False)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="SET NULL"), nullable=True)
+    error = Column(Text, nullable=True)
+
+    batch = relationship("IrisBatch", back_populates="items")
+    analysis = relationship("IrisAnalysis")
+
+    __table_args__ = (
+        Index("ix_iris_batch_item_batch_id", "batch_id"),
     )
