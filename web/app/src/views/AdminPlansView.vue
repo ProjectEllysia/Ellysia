@@ -251,7 +251,7 @@ import { useToastStore } from '@/stores/toastStore'
 const { apiFetch, apiError } = useApi()
 const toast = useToastStore()
 
-const PERIODS = { month: 'mensual', day: 'diario', stock: 'existencias' }
+const PERIODS = { month: 'mensual', day: 'diario', stock: 'existencias', tier: 'nivel' }
 
 const plans = ref([])
 const limitKeys = ref([])
