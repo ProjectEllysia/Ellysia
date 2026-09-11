@@ -60,7 +60,10 @@ export const useIrisStore = defineStore('iris', () => {
   async function fetchCapabilities() {
     if (capabilities.value) return capabilities.value
     try {
-      capabilities.value = await apiFetch('/iris/capabilities')
+      // apiFetch devuelve la Response, no el cuerpo: sin el .json() la vista
+      // leía `maxMessageBytes` de la Response y caía siempre al respaldo.
+      const res = await apiFetch('/iris/capabilities')
+      capabilities.value = res?.ok ? await res.json() : null
     } catch {
       // Silencioso a propósito: no poder leer los límites no impide analizar
       // nada, solo hace que la interfaz use su respaldo. Un toast de error
