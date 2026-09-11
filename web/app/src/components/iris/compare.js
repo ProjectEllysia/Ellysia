@@ -4,7 +4,9 @@
  * Vive fuera del componente para poder probarla con `node` a secas (ver
  * `test/iris.compare.test.mjs`), igual que `intake.js`. Recibe los informes tal
  * como los devuelve `GET /iris/results/<id>` y no reinterpreta nada: solo
- * empareja reglas por nombre y señala qué cambia.
+ * empareja reglas y señala qué cambia. Empareja por `ruleId`, que es estable
+ * aunque el nombre visible cambie entre dos versiones del catálogo, y por
+ * `ruleName` en análisis anteriores a que existiera el id.
  */
 
 /**
@@ -19,16 +21,17 @@
  *   reglas que cambian van primero; dentro de cada grupo, por nombre.
  */
 export function compareReports(left, right) {
-  const byName = new Map()
+  const byKey = new Map()
   for (const [side, report] of [['left', left], ['right', right]]) {
     for (const rule of report?.rules ?? []) {
-      const entry = byName.get(rule.ruleName) ?? { ruleName: rule.ruleName, left: null, right: null }
+      const key = rule.ruleId || rule.ruleName
+      const entry = byKey.get(key) ?? { ruleId: rule.ruleId ?? null, ruleName: rule.ruleName, left: null, right: null }
       entry[side] = { score: rule.score, verdict: rule.verdict }
-      byName.set(rule.ruleName, entry)
+      byKey.set(key, entry)
     }
   }
 
-  const rules = [...byName.values()].map(entry => ({
+  const rules = [...byKey.values()].map(entry => ({
     ...entry,
     changed: entry.left?.verdict !== entry.right?.verdict || entry.left?.score !== entry.right?.score,
   }))

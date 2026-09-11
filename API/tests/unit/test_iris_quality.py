@@ -54,8 +54,10 @@ def test_a_broken_rule_degrades_and_is_recorded():
     quality = assess_quality(rules, [_ok(), _errored()])
 
     assert quality.quality == QUALITY_DEGRADED
+    # La regla sintética no declara rule_id; las del catálogo sí (ver
+    # test_iris_rule_taxonomy.py).
     assert quality.failed_rules == [
-        {"name": "Body Links", "family": "links", "category": "header_analysis"}
+        {"name": "Body Links", "ruleId": None, "family": "links", "category": "header_analysis"}
     ]
 
 

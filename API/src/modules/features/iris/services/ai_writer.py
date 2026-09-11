@@ -156,6 +156,7 @@ class IrisAIWriter:
         failed_rules = [
             {
                 "name": rule.get("ruleName"),
+                "ruleId": rule.get("ruleId"),
                 "category": rule.get("category"),
                 "score": rule.get("score"),
                 "recommendation": rule.get("recommendation"),

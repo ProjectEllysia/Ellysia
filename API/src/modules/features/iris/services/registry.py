@@ -13,10 +13,38 @@ contiene el mecanismo de registro.
 from __future__ import annotations
 
 import functools
+import re
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from .evidence import anchor_result
+
+#: Forma de un ``rule_id``: ``iris.<grupo>.<nombre>``, en minúsculas. Es un
+#: identificador estable: no cambia aunque cambie el nombre visible de la regla.
+_RULE_ID_RE = re.compile(r"^iris\.[a-z_]+\.[a-z0-9_]+$")
+
+#: Técnica o subtécnica de MITRE ATT&CK (``T1566`` o ``T1566.002``).
+_MITRE_TECHNIQUE_RE = re.compile(r"^T\d{4}(\.\d{3})?$")
+
+
+class RuleSeverity(StrEnum):
+    """Gravedad de un hallazgo de la regla, separada de su score.
+
+    El score mide cuánto pesa la señal en el veredicto; la severidad dice
+    cuánto importa el hecho si es cierto (una suplantación de dominio es
+    crítica aunque la regla pese poco en un mensaje concreto).
+
+    Attributes:
+        LOW: Indicio débil o frecuente en correo legítimo.
+        MEDIUM: Anomalía que merece revisión.
+        HIGH: Indicador fuerte de phishing.
+        CRITICAL: Suplantación deliberada de una identidad.
+    """
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 @dataclass
@@ -68,7 +96,8 @@ class RuleRegistry:
                  description: str = "", needs_context: bool = False,
                  family: str = "", is_body_dependent: bool = False,
                  evidence_headers: Sequence[str] = (), is_self_anchoring: bool = False,
-                 unanchorable_reason: str = ""):
+                 unanchorable_reason: str = "", rule_id: str = "", severity: str = "",
+                 mitre_techniques: Sequence[str] = ()):
         """Decorator that registers a function as an analysis rule.
 
         La regla se guarda envuelta: tras ejecutarla, el envoltorio garantiza
@@ -108,7 +137,18 @@ class RuleRegistry:
                 el que los hallazgos de la regla no se pueden anclar a un
                 fragmento concreto. Por defecto vacío.
 
-            Toda regla declara al menos una de las tres últimas: el catálogo no
+            rule_id: Identificador estable (``iris.<grupo>.<nombre>``). Es lo
+                que usan el PDF, la API y las exportaciones para referirse al
+                hallazgo; el nombre visible puede cambiar sin tocarlo.
+                Obligatorio y único en el catálogo.
+            severity: ``RuleSeverity`` del hallazgo, separada del score.
+                Obligatoria.
+            mitre_techniques: Técnicas MITRE ATT&CK (``T1566.002``) que
+                corresponden al hallazgo, solo si encajan de verdad: la mayoría
+                de heurísticas no son una técnica. Por defecto ninguna.
+
+            Toda regla declara al menos una de ``evidence_headers``,
+            ``is_self_anchoring`` o ``unanchorable_reason``: el catálogo no
             admite reglas cuyos hallazgos no digan dónde están ni por qué no.
 
         Returns:
@@ -116,13 +156,26 @@ class RuleRegistry:
 
         Raises:
             ValueError: Si la regla no declara ni ``evidence_headers``, ni
-                ``is_self_anchoring``, ni ``unanchorable_reason``.
+                ``is_self_anchoring``, ni ``unanchorable_reason``; si su
+                ``rule_id`` falta, no tiene la forma ``iris.<grupo>.<nombre>`` o
+                ya existe; si la severidad no es una de ``RuleSeverity``; o si
+                alguna técnica no tiene forma de técnica ATT&CK.
         """
         if not (evidence_headers or is_self_anchoring or unanchorable_reason):
             raise ValueError(
                 f"La regla '{name}' debe declarar cómo ancla su evidencia: "
                 "evidence_headers, is_self_anchoring o unanchorable_reason."
             )
+        if not _RULE_ID_RE.match(rule_id or ""):
+            raise ValueError(f"La regla '{name}' necesita un rule_id con forma iris.<grupo>.<nombre>.")
+        if any(rule["rule_id"] == rule_id for rule in self._rules):
+            raise ValueError(f"El rule_id '{rule_id}' ya está registrado.")
+        if severity not in {member.value for member in RuleSeverity}:
+            raise ValueError(f"La regla '{name}' tiene una severidad desconocida: {severity!r}.")
+        techniques = tuple(mitre_techniques)
+        invalid = [technique for technique in techniques if not _MITRE_TECHNIQUE_RE.match(technique)]
+        if invalid:
+            raise ValueError(f"La regla '{name}' declara técnicas ATT&CK no válidas: {invalid}.")
         header_names = tuple(evidence_headers)
 
         def decorator(func: Callable) -> Callable:
@@ -142,6 +195,9 @@ class RuleRegistry:
                 "evidence_headers": header_names,
                 "is_self_anchoring": is_self_anchoring,
                 "unanchorable_reason": unanchorable_reason,
+                "rule_id": rule_id,
+                "severity": severity,
+                "mitre_techniques": techniques,
             })
             return func
         return decorator

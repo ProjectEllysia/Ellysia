@@ -217,6 +217,40 @@ class IrisReportTheme:
         return [pill_wrapper, title_wrapper, divider_wrapper]
 
 
+def _rule_cell(rule: Dict[str, Any]) -> str:
+    """Celda de la tabla de reglas: nombre visible y, debajo, el id estable.
+
+    Args:
+        rule: Regla serializada del informe.
+
+    Returns:
+        str: Marcado de reportlab, con el texto ya escapado.
+    """
+    text = _esc(rule.get("ruleName", ""))
+    if rule.get("ruleId"):
+        text += f"<br/><font size='7' color='#6b7280'>{_esc(rule['ruleId'])}</font>"
+    return text
+
+
+def _rule_reference(rule: Dict[str, Any]) -> str:
+    """Referencia estable de un hallazgo para el detalle: id y técnicas ATT&CK.
+
+    Args:
+        rule: Regla serializada del informe.
+
+    Returns:
+        str: `` (<id> · ATT&CK T1566.002)`` ya escapado; cadena vacía si la
+            regla no tiene id (análisis anteriores a la taxonomía).
+    """
+    if not rule.get("ruleId"):
+        return ""
+    reference = f"<font face='Courier'>{_esc(rule['ruleId'])}</font>"
+    techniques = rule.get("mitreTechniques") or []
+    if techniques:
+        reference += " · ATT&amp;CK " + ", ".join(_esc(technique) for technique in techniques)
+    return f" ({reference})"
+
+
 class IrisPDFCreator:
     """Builds a complete PDF report from an Iris analysis report dict.
 
@@ -623,7 +657,7 @@ class IrisPDFCreator:
             score = rule.get("score", 0)
             sign = "+" if score > 0 else ""
             rule_data.append([
-                Paragraph(_esc(rule.get("ruleName", "")), theme.cell_left),
+                Paragraph(_rule_cell(rule), theme.cell_left),
                 Paragraph(_esc(rule.get("category") or "-"), theme.cell_left),
                 Paragraph(f"{sign}{score}", theme.cell_center),
                 Paragraph(_esc(rule.get("verdict", "")), theme.cell_center),
@@ -655,7 +689,8 @@ class IrisPDFCreator:
             elements.append(Paragraph("Detalle de hallazgos", theme.subtitle))
             elements.append(Spacer(1, 0.08 * inch))
             for flagged_rule in flagged:
-                text = f"<b>{_esc(flagged_rule.get('ruleName'))}:</b> {_esc(flagged_rule.get('recommendation'))}"
+                text = (f"<b>{_esc(flagged_rule.get('ruleName'))}</b>{_rule_reference(flagged_rule)}: "
+                        f"{_esc(flagged_rule.get('recommendation'))}")
                 # El extracto ya viene desactivado (hxxp, [.], [@]): el PDF sale
                 # del panel autenticado y no debe llevar enlaces vivos.
                 evidence = flagged_rule.get("evidence") or []

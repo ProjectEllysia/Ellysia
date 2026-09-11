@@ -213,8 +213,16 @@ class RuleResultSchema(Schema):
 
     Una regla que penaliza trae ``evidence`` o, si su hallazgo no se puede
     anclar a un fragmento del mensaje, ``evidenceUnavailableReason``.
+
+    ``ruleId`` es el identificador estable del hallazgo (``ruleName`` es el
+    nombre visible y puede cambiar); ``severity`` es su gravedad, separada del
+    score, y ``mitreTechniques`` sus técnicas ATT&CK. Los tres valen ``null``
+    (o lista vacía) en análisis anteriores a la taxonomía.
     """
+    ruleId = fields.String(load_default=None, allow_none=True)
     ruleName = fields.String()
+    severity = fields.String(load_default=None, allow_none=True)
+    mitreTechniques = fields.List(fields.String(), load_default=list)
     category = fields.String(load_default=None)
     score = fields.Float()
     verdict = fields.String()
@@ -226,6 +234,7 @@ class RuleResultSchema(Schema):
 
 class TopSignalSchema(Schema):
     """One of the highest-penalty rules for a finished analysis."""
+    ruleId = fields.String(load_default=None, allow_none=True)
     ruleName = fields.String()
     category = fields.String(load_default=None)
     score = fields.Float()
@@ -248,6 +257,7 @@ class FailedRuleSchema(Schema):
     parte del mensaje se quedó sin inspeccionar.
     """
     name = fields.String()
+    ruleId = fields.String(load_default=None, allow_none=True)
     family = fields.String(load_default=None, allow_none=True)
     category = fields.String(load_default=None, allow_none=True)
 

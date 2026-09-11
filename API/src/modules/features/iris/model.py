@@ -548,6 +548,15 @@ class IrisRuleResult(Base):
                         o no pudo anclarse.
         evidence_unavailable_reason: Por qué un hallazgo no se puede anclar;
                         NULL si tiene evidencia o si la regla no penalizó.
+        rule_id: Identificador estable de la regla (``iris.<grupo>.<nombre>``),
+                        independiente de ``rule_name``, que es visible y puede
+                        cambiar. NULL en filas anteriores a la taxonomía.
+        severity: Gravedad del hallazgo (``low``, ``medium``, ``high`` o
+                        ``critical``), separada del score; la del catálogo
+                        cuando se analizó. NULL en filas anteriores.
+        mitre_techniques: Técnicas MITRE ATT&CK de la regla cuando se analizó
+                        (``["T1566.002"]``); NULL si no tiene o en filas
+                        anteriores.
         analysis: SQLAlchemy back-reference to the parent IrisAnalysis.
     """
     __tablename__ = "IrisRuleResult"
@@ -564,11 +573,15 @@ class IrisRuleResult(Base):
     context_type = Column(String(16), nullable=True)
     evidence = Column(JSONB, nullable=True)
     evidence_unavailable_reason = Column(Text, nullable=True)
+    rule_id = Column(String(64), nullable=True)
+    severity = Column(String(16), nullable=True)
+    mitre_techniques = Column(JSONB, nullable=True)
 
     analysis = relationship("IrisAnalysis", back_populates="rule_results")
 
     __table_args__ = (
         Index("ix_iris_rule_result_analysis_id", "analysis_id"),
+        Index("ix_iris_rule_result_rule_id", "rule_id"),
     )
 
 
