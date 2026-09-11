@@ -256,3 +256,35 @@ def test_preview_note_says_the_original_won_by_default():
     report = _sample_report(unwrappedFromForward=True, wrapperFrom="colega@corp.example")
     text = _rendered_preview_text(report)
     assert "correo original reenviado" in text
+
+
+# ------------------------------------------------ confianza y cobertura
+
+def _rendered_confidence_text(report: dict) -> str:
+    creator = IrisPDFCreator(report=report)
+    elements: list = []
+    creator.append_confidence(elements, _theme())
+    texts = []
+    for element in elements:
+        for row in getattr(element, "_cellvalues", []):
+            texts.extend(cell.text for cell in row if hasattr(cell, "text"))
+    return "\n".join(texts)
+
+
+def test_confidence_card_shows_level_coverage_and_reasons_without_a_percentage():
+    report = _sample_report(
+        confidence="low",
+        coverage={"mode": "headers_only", "uncoveredRules": ["Body Links", "Body Content"]},
+        uncertaintyReasons=["Solo se analizaron las cabeceras."],
+    )
+    text = _rendered_confidence_text(report)
+    assert "Confianza del análisis: Baja" in text
+    assert "no una probabilidad" in text
+    assert "solo cabeceras" in text
+    assert "Body Links, Body Content" in text
+    assert "Solo se analizaron las cabeceras." in text
+    assert "%" not in text
+
+
+def test_confidence_card_is_omitted_for_reports_without_confidence():
+    assert _rendered_confidence_text(_sample_report()) == ""

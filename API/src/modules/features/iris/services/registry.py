@@ -53,7 +53,7 @@ class RuleRegistry:
 
     def register(self, name: str, category: str = "general",
                  description: str = "", needs_context: bool = False,
-                 family: str = ""):
+                 family: str = "", is_body_dependent: bool = False):
         """Decorator that registers a function as an analysis rule.
 
         Args:
@@ -69,6 +69,13 @@ class RuleRegistry:
                 "identity") para que ``_aggregate_score`` limite la suma de
                 penalizaciones de la familia y no cuente el mismo hecho varias
                 veces. Cadena vacía = sin techo.
+            is_body_dependent: ``True`` si la regla lee el cuerpo, los enlaces
+                o los adjuntos del mensaje, es decir, si en un análisis de solo
+                cabeceras no tiene nada que inspeccionar. Es lo que alimenta la
+                cobertura del análisis (``services/quality.assess_coverage``).
+                No equivale a ``needs_context``: varias reglas de contexto solo
+                leen la cadena Received, que sí existe sin cuerpo. Por defecto
+                ``False``.
 
         Returns:
             A decorator that appends the function to the internal rule list.
@@ -81,6 +88,7 @@ class RuleRegistry:
                 "description": description,
                 "needs_context": needs_context,
                 "family": family,
+                "is_body_dependent": is_body_dependent,
             })
             return func
         return decorator

@@ -179,7 +179,7 @@ def _has_evasive_hidden_text(body_html: str) -> bool:
 
 
 @iris_rules.register(
-    name="Body Content", category="content_analysis", family="content",
+    name="Body Content", is_body_dependent=True, category="content_analysis", family="content",
     description=(
         "Escanea el cuerpo del correo en busca de frases de phishing "
         "(credenciales/pago) y técnicas de texto oculto."
@@ -229,7 +229,7 @@ def check_body_content(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="BEC Wire Transfer Pattern",
+    name="BEC Wire Transfer Pattern", is_body_dependent=True,
     category="content_analysis", family="content",
     description=(
         "Detecta el patrón típico de BEC (Business Email Compromise): "
@@ -306,7 +306,7 @@ def check_bec_wire_pattern(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Generic Greeting",
+    name="Generic Greeting", is_body_dependent=True,
     category="content_analysis", family="content",
     description=(
         "Detecta el patrón clásico de phishing masivo: saludo genérico "
@@ -463,7 +463,7 @@ def _mixed_script(text: str) -> str | None:
 
 
 @iris_rules.register(
-    name="Unicode Evasion", category="content_analysis", family="content",
+    name="Unicode Evasion", is_body_dependent=True, category="content_analysis", family="content",
     description=(
         "Detecta caracteres de control bidireccional (RLO/LRO - spoofing de "
         "extension de archivo) y mezcla de scripts confusables (cirilico/"
@@ -640,7 +640,7 @@ _PHONE_RE = re.compile(r"(?:\+\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?
 
 
 @iris_rules.register(
-    name="TOAD Callback Pattern",
+    name="TOAD Callback Pattern", is_body_dependent=True,
     category="content_analysis", family="content",
     description=(
         "Detecta el patron TOAD (Telephone-Oriented Attack Delivery): un "

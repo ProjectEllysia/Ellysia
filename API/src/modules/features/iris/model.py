@@ -61,6 +61,17 @@ class IrisAnalysis(Base):
         detector_version: Marca del catálogo de reglas que produjo el
                  resultado (``iris-rules:<n>:<hash>``). Sin ella, un informe
                  guardado deja de ser interpretable cuando el catálogo cambia.
+        confidence: Confianza ordinal del veredicto: "high", "medium" o "low".
+                 **No es una probabilidad** (el score no está calibrado); sale
+                 de reglas deterministas y va siempre con sus motivos en
+                 ``uncertainty_reasons``. NULL en análisis anteriores a que se
+                 calculara. Ver ``services/quality.assess_confidence``.
+        coverage: Qué partes del mensaje se inspeccionaron: ``mode``
+                 ("full_message" o "headers_only") y ``uncoveredRules``, las
+                 reglas de cuerpo, enlaces y adjuntos que no tuvieron
+                 contenido que mirar. NULL en análisis antiguos.
+        uncertainty_reasons: Frases legibles que explican por qué la
+                 confianza no es "high"; lista vacía o NULL si no hay motivos.
         winning_context: Qué mensaje produjo el veredicto: "inner" (el
                  original desenvuelto de un reenvío, o el único mensaje si no
                  lo era) o "wrapper" (el envoltorio del reenvío, cuando es más
@@ -128,6 +139,9 @@ class IrisAnalysis(Base):
     analysis_quality = Column(String(16), nullable=True)
     failed_rules = Column(JSONB, nullable=True)
     detector_version = Column(String(64), nullable=True)
+    confidence = Column(String(16), nullable=True)
+    coverage = Column(JSONB, nullable=True)
+    uncertainty_reasons = Column(JSONB, nullable=True)
     winning_context = Column(String(16), nullable=True)
     winning_reason = Column(Text, nullable=True)
     secondary_context = Column(JSONB, nullable=True)

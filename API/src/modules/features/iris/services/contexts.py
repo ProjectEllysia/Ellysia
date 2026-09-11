@@ -12,7 +12,7 @@ describan siempre el mismo mensaje.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional
 
 from .parsers import MessageContext, decode_mime_words
@@ -51,6 +51,9 @@ class ContextEvaluation:
         results: Un ``RuleResult`` por regla, emparejado por posición con el
             catálogo evaluado.
         quality: ``AnalysisQuality`` de este contexto.
+        coverage: Cobertura de este contexto (``mode`` y ``uncoveredRules``,
+            ver ``services/quality.assess_coverage``). Por defecto un dict
+            vacío, que se lee como "sin información de cobertura".
     """
 
     context_type: str
@@ -59,6 +62,7 @@ class ContextEvaluation:
     gate_reasons: List[str]
     results: List[Any]
     quality: Any
+    coverage: Dict[str, Any] = field(default_factory=dict)
 
 
 def choose_winning_evaluation(

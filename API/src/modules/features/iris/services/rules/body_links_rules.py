@@ -40,7 +40,7 @@ def _max_score_floor() -> float:
 
 
 @iris_rules.register(
-    name="Body Links", category="content_analysis", family="links",
+    name="Body Links", is_body_dependent=True, category="content_analysis", family="links",
     description=(
         "Analiza los enlaces reales del cuerpo: texto visible vs href, "
         "punycode/IDN, IPs literales, acortadores de URL, credenciales en la "
@@ -108,7 +108,7 @@ def _decode_qr_urls(image_bytes: bytes) -> list[str]:
 
 
 @iris_rules.register(
-    name="QR Code Links", category="content_analysis", family="links",
+    name="QR Code Links", is_body_dependent=True, category="content_analysis", family="links",
     description=(
         "Decodifica códigos QR en imágenes inline/adjuntas y analiza la URL "
         "resultante con la misma batería de chequeos que Body Links "
@@ -176,7 +176,7 @@ def _looks_opaque_path(path: str) -> bool:
 
 
 @iris_rules.register(
-    name="Compromised Legitimate Domain",
+    name="Compromised Legitimate Domain", is_body_dependent=True,
     category="content_analysis", family="links",
     description=(
         "Detecta enlaces a dominios legítimos que probablemente han sido "
@@ -247,7 +247,7 @@ def check_compromised_legitimate_domain(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="External Login Link",
+    name="External Login Link", is_body_dependent=True,
     category="content_analysis",
     description=(
         "Señal informativa (score 0): ¿hay algún enlace del cuerpo cuyo "
