@@ -301,9 +301,11 @@ def test_lookalike_cousin_domain_is_flagged():
 
 
 def test_lookalike_punycode_domain_is_flagged():
+    """``xn--pypal-4ve`` es «pаypal» con una ``а`` cirílica: homógrafo de marca."""
     result = check_lookalike_domain({"from": "a@xn--pypal-4ve.com"})
     assert result.verdict == "fail"
-    assert result.details["type"] == "punycode"
+    assert result.details["type"] == "idn_homograph"
+    assert result.details["brand"] == "paypal"
 
 
 def test_lookalike_legitimate_brand_domain_passes():
