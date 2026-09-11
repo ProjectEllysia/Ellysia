@@ -23,6 +23,7 @@ import {
   isZipFile,
   formatByteLimit,
   isEmlFile,
+  isMsgFile,
   resolveMaxMessageBytes,
 } from '../src/components/iris/intake.js'
 
@@ -126,6 +127,11 @@ check('dos .eml son lote', isBatchDrop([file('a.eml', 10), file('b.eml', 10)]))
 check('un ZIP suelto es lote', isBatchDrop([file('buzon.zip', 10)]))
 check('un ZIP sin extensión se reconoce por tipo', isZipFile(file('buzon', 10, 'application/zip')))
 check('nada no es lote', !isBatchDrop([]))
+// El navegador no puede leer un .msg (es binario): lo convierte el servidor.
+check('un .msg suelto va a lote', isBatchDrop([file('aviso.msg', 10)]))
+check('un .msg en mayúsculas también', isBatchDrop([file('AVISO.MSG', 10)]))
+check('un .msg sin extensión se reconoce por tipo', isMsgFile(file('aviso', 10, 'application/vnd.ms-outlook')))
+check('un .eml no es un .msg', !isMsgFile(file('a.eml', 10)))
 
 console.log(`\n${passed} pasados, ${failed} fallidos`)
 process.exit(failed === 0 ? 0 : 1)

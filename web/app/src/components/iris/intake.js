@@ -105,15 +105,26 @@ export function isZipFile(file) {
   return /\.zip$/i.test(file.name ?? '') || ['application/zip', 'application/x-zip-compressed'].includes(file.type)
 }
 
+/** ¿Es un `.msg` de Outlook? Por extensión o por el tipo MIME que le ponen
+ *  algunos sistemas (`application/vnd.ms-outlook`). */
+export function isMsgFile(file) {
+  if (!file) return false
+  return /\.msg$/i.test(file.name ?? '') || file.type === 'application/vnd.ms-outlook'
+}
+
 /**
- * ¿Se analiza como lote? Sí si llega más de un fichero o algún ZIP: un `.eml`
- * suelto sigue el camino de siempre (se carga en el formulario para elegir el
- * modo), y lo demás va a `POST /iris/analyze/batch`, que es quien decide qué
- * entra y qué se rechaza.
+ * ¿Se analiza como lote? Sí si llega más de un fichero, algún ZIP o algún
+ * `.msg`: un `.eml` suelto sigue el camino de siempre (se carga en el
+ * formulario para elegir el modo), y lo demás va a `POST /iris/analyze/batch`,
+ * que es quien decide qué entra y qué se rechaza.
+ *
+ * Un `.msg` va siempre a lote aunque llegue solo porque es un fichero binario
+ * de Outlook: el navegador no puede sacar de él las cabeceras para el
+ * formulario, y el servidor sí sabe convertirlo a `.eml`.
  */
 export function isBatchDrop(files) {
   const list = Array.from(files ?? [])
-  return list.length > 1 || list.some(isZipFile)
+  return list.length > 1 || list.some((file) => isZipFile(file) || isMsgFile(file))
 }
 
 /** Tamaño legible para el aviso que ve el usuario ("10 MB"). */
