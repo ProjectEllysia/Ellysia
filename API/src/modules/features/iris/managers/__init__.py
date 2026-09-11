@@ -18,6 +18,8 @@ Managers del módulo Iris (análisis de correo).
   administradores — compara políticas de puntuación sobre el corpus.
 - ``IrisTrustPolicyManager`` (``trust.py``): excepciones de confianza por
   usuario (remitentes y dominios), con motivo, caducidad y revocación.
+- ``IrisTriageManager`` (``triage.py``): vistas guardadas y etiquetas del
+  historial de triaje.
 
 Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el
@@ -39,10 +41,12 @@ from .notifications import IrisPhishingNotifyManager, IrisNotificationPreference
 from .feedback import IrisFeedbackManager
 from .replay import IrisReplayManager
 from .trust import IrisTrustPolicyManager
+from .triage import IrisTriageManager
 
 __all__ = [
     "IrisManager",
     "IrisTrustPolicyManager",
+    "IrisTriageManager",
     "IrisFeedbackManager",
     "IrisReplayManager",
     "IrisReportManager",

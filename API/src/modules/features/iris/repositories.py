@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import and_, asc, delete, desc, func, nullslast, select, update
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from src.modules.infrastructure import BaseRepository, DocumentRepository
 from src.modules.shared import utcnow_naive
@@ -20,6 +20,7 @@ from .model import (
     IrisAnalystFeedback,
     IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisNotificationPreference,
     IrisRawMessage, IrisRuleResult, IrisDocument, IrisTrustedSender,
+    IrisAnalysisTag, IrisIndicator, IrisSavedView,
 )
 
 
@@ -64,6 +65,7 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         self, user_id: int, page: int, per_page: int, *,
         search: str | None = None, verdict: str | None = None,
         status: str | None = None, source: str | None = None,
+        tag: str | None = None, ioc: str | None = None, review: str | None = None,
         sort_by: str = "date", sort_dir: str = "desc",
     ) -> Tuple[List[IrisAnalysis], int]:
         """Return a page of analyses for a user plus the total count.
@@ -77,6 +79,11 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
             status: Optional exact match on ``status``.
             source: "manual" (``connection_id IS NULL``) or "mailbox"
                 (``connection_id IS NOT NULL``); ``None`` = no filter.
+            tag: Solo los análisis con esta etiqueta exacta; ``None`` = sin filtro.
+            ioc: Solo los análisis cuyo índice de IOCs contiene este texto
+                (ya normalizado por el llamante); ``None`` = sin filtro.
+            review: ``pending`` (terminados y sin ninguna corrección del
+                analista) o ``reviewed`` (con al menos una); ``None`` = sin filtro.
             sort_by: One of ``_SORTABLE_COLUMNS`` — validated upstream by
                 ``ResultsQuerySchema``.
             sort_dir: "asc" or "desc".
@@ -86,9 +93,22 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         """
         query = (
             self._session.query(IrisAnalysis)
-            .options(joinedload(IrisAnalysis.connection))
+            .options(joinedload(IrisAnalysis.connection), selectinload(IrisAnalysis.tags))
             .filter(IrisAnalysis.user_id == user_id)
         )
+        if tag:
+            query = query.filter(IrisAnalysis.id.in_(
+                select(IrisAnalysisTag.analysis_id).where(IrisAnalysisTag.name == tag)
+            ))
+        if ioc:
+            query = query.filter(IrisAnalysis.id.in_(
+                select(IrisIndicator.analysis_id).where(IrisIndicator.value.contains(ioc, autoescape=True))
+            ))
+        reviewed_ids = select(IrisAnalystFeedback.analysis_id)
+        if review == "pending":
+            query = query.filter(IrisAnalysis.status == "finished", IrisAnalysis.id.notin_(reviewed_ids))
+        elif review == "reviewed":
+            query = query.filter(IrisAnalysis.id.in_(reviewed_ids))
         if search:
             query = query.filter(IrisAnalysis.title.ilike(f"%{search}%"))
         if verdict:
@@ -584,6 +604,25 @@ class IrisAnalystFeedbackRepository(BaseRepository[IrisAnalystFeedback]):
             .first()
         )
 
+    def get_reviewed_ids(self, analysis_ids: List[int]) -> set[int]:
+        """De una lista de análisis, cuáles tienen al menos una corrección.
+
+        Args:
+            analysis_ids: Primary keys de los análisis a mirar.
+
+        Returns:
+            set[int]: Los que un analista ha revisado; vacío si ninguno.
+        """
+        if not analysis_ids:
+            return set()
+        rows = (
+            self._session.query(IrisAnalystFeedback.analysis_id)
+            .filter(IrisAnalystFeedback.analysis_id.in_(analysis_ids))
+            .distinct()
+            .all()
+        )
+        return {row[0] for row in rows}
+
     def latest_per_analysis_for_user(self, user_id: int) -> List[IrisAnalystFeedback]:
         """La corrección vigente de cada análisis revisado de un usuario.
 
@@ -715,6 +754,101 @@ class IrisTrustedSenderRepository(BaseRepository[IrisTrustedSender]):
             )
             .first()
         ) is not None
+
+
+class IrisSavedViewRepository(BaseRepository[IrisSavedView]):
+    """Acceso a las vistas guardadas del historial (``IrisSavedView``)."""
+
+    _MODEL = IrisSavedView
+
+    def get_by_user(self, user_id: int) -> List[IrisSavedView]:
+        """Vistas de un usuario, por nombre.
+
+        Args:
+            user_id: Dueño de las vistas.
+
+        Returns:
+            List[IrisSavedView]: Las vistas; lista vacía si no tiene.
+        """
+        return (
+            self._session.query(IrisSavedView)
+            .filter(IrisSavedView.user_id == user_id)
+            .order_by(IrisSavedView.name.asc())
+            .all()
+        )
+
+    def count_by_user(self, user_id: int) -> int:
+        """Cuántas vistas tiene guardadas un usuario.
+
+        Args:
+            user_id: Dueño de las vistas.
+
+        Returns:
+            int: Número de vistas.
+        """
+        return self._session.query(IrisSavedView.id).filter(IrisSavedView.user_id == user_id).count()
+
+    def get_by_user_and_name(self, user_id: int, name: str) -> Optional[IrisSavedView]:
+        """Vista de un usuario con un nombre exacto.
+
+        Args:
+            user_id: Dueño de las vistas.
+            name: Nombre ya recortado.
+
+        Returns:
+            Optional[IrisSavedView]: La vista, o ``None`` si no hay ninguna con ese nombre.
+        """
+        return (
+            self._session.query(IrisSavedView)
+            .filter(IrisSavedView.user_id == user_id, IrisSavedView.name == name)
+            .first()
+        )
+
+
+class IrisAnalysisTagRepository(BaseRepository[IrisAnalysisTag]):
+    """Acceso a las etiquetas de los análisis (``IrisAnalysisTag``)."""
+
+    _MODEL = IrisAnalysisTag
+
+    def delete_by_analysis(self, analysis_id: int) -> None:
+        """Quita todas las etiquetas de un análisis.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis``.
+        """
+        self._session.query(IrisAnalysisTag).filter(IrisAnalysisTag.analysis_id == analysis_id).delete()
+
+    def count_by_name_for_user(self, user_id: int) -> List[Tuple[str, int]]:
+        """Etiquetas que usa un usuario y en cuántos análisis aparece cada una.
+
+        Args:
+            user_id: Dueño de los análisis.
+
+        Returns:
+            List[Tuple[str, int]]: ``(nombre, análisis)``, de la más usada a la
+                menos y, a igual uso, por nombre.
+        """
+        count = func.count(IrisAnalysisTag.id)
+        return [
+            (name, total) for name, total in (
+                self._session.query(IrisAnalysisTag.name, count)
+                .join(IrisAnalysis, IrisAnalysis.id == IrisAnalysisTag.analysis_id)
+                .filter(IrisAnalysis.user_id == user_id)
+                .group_by(IrisAnalysisTag.name)
+                .order_by(count.desc(), IrisAnalysisTag.name.asc())
+                .all()
+            )
+        ]
+
+
+class IrisIndicatorRepository(BaseRepository[IrisIndicator]):
+    """Acceso al índice de IOCs (``IrisIndicator``).
+
+    Las búsquedas por IOC las hace ``IrisAnalysisRepository.get_by_user_paginated``,
+    que es donde se combinan con el resto de filtros del historial.
+    """
+
+    _MODEL = IrisIndicator
 
 
 class IrisReportRepository(DocumentRepository[IrisDocument]):
