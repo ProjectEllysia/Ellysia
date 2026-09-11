@@ -202,6 +202,7 @@
           :rule="entry.rule"
           :expanded="expandedRule === entry.i"
           @toggle="toggleRule(entry.i)"
+          @jump-evidence="jumpToEvidence"
         />
 
         <!-- Reglas superadas (pass), plegadas por defecto para no alargar el scroll -->
@@ -219,6 +220,7 @@
                 :rule="entry.rule"
                 :expanded="expandedRule === entry.i"
                 @toggle="toggleRule(entry.i)"
+                @jump-evidence="jumpToEvidence"
               />
             </div>
           </Transition>
@@ -287,7 +289,11 @@
           Cabeceras originales
         </button>
         <Transition name="raw-reveal">
-          <pre v-if="rawOpen" class="raw-block">{{ reportData.rawHeaders }}</pre>
+          <pre v-if="rawOpen" ref="rawBlock" class="raw-block"><span
+            v-for="(line, n) in rawLines"
+            :key="n"
+            :class="['raw-line', { 'raw-line--hit': n === highlightedLine }]"
+          >{{ line }}{{ '\n' }}</span></pre>
         </Transition>
       </div>
 
@@ -335,6 +341,42 @@ defineEmits(['cancel', 'delete'])
 const expandedRule = ref(null)
 const rawOpen = ref(false)
 let ruleCardEls = []
+
+// Salto desde la evidencia de una regla a su línea en "Cabeceras originales".
+const rawBlock = ref(null)
+const highlightedLine = ref(null)
+const rawLines = computed(() => (props.reportData?.rawHeaders ?? '').split(/\r?\n/))
+
+/** Índice de línea de la aparición `occurrence` de la cabecera `header`, o
+ * null si no está. En un reenvío cuyo veredicto sale del original adjunto,
+ * sus cabeceras viven dentro de la parte message/rfc822: se busca a partir de
+ * ahí para no caer en la cabecera homónima del envoltorio. */
+function findHeaderLine(lines, header, occurrence) {
+  let start = 0
+  if (props.reportData?.unwrappedFromForward && props.reportData?.winningContext !== 'wrapper') {
+    const nested = lines.findIndex(line => /^content-type:\s*message\/rfc822/i.test(line))
+    if (nested >= 0) start = nested + 1
+  }
+  const escaped = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const prefix = new RegExp(`^${escaped}\\s*:`, 'i')
+  let seen = 0
+  for (let n = start; n < lines.length; n++) {
+    if (!prefix.test(lines[n])) continue
+    if (seen === occurrence) return n
+    seen++
+  }
+  return null
+}
+
+async function jumpToEvidence(item) {
+  const line = findHeaderLine(rawLines.value, item.locator?.header ?? '', item.locator?.occurrence ?? 0)
+  rawOpen.value = true
+  highlightedLine.value = line
+  await nextTick()
+  if (line !== null) {
+    rawBlock.value?.querySelectorAll('.raw-line')[line]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
 
 function toggleRule(i) {
   expandedRule.value = expandedRule.value === i ? null : i
@@ -926,6 +968,11 @@ watch(
   font-size: var(--fs-sm);
   color: var(--text-muted);
   word-break: break-word;
+}
+
+.raw-line--hit {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 3px;
 }
 
 .rv-gates {
