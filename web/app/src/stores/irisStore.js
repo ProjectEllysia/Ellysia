@@ -4,6 +4,7 @@ import { useApi } from '@/composables/useApi'
 import { usePolling } from '@/composables/usePolling'
 import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
+import { MODE_HEADERS, MODE_MESSAGE, buildSubmission } from '@/components/iris/intake.js'
 
 export const useIrisStore = defineStore('iris', () => {
   const { apiFetch, apiError } = useApi()
@@ -59,7 +60,10 @@ export const useIrisStore = defineStore('iris', () => {
   async function fetchCapabilities() {
     if (capabilities.value) return capabilities.value
     try {
-      capabilities.value = await apiFetch('/iris/capabilities')
+      // apiFetch devuelve la Response, no el cuerpo: sin el .json() la vista
+      // leía `maxMessageBytes` de la Response y caía siempre al respaldo.
+      const res = await apiFetch('/iris/capabilities')
+      capabilities.value = res?.ok ? await res.json() : null
     } catch {
       // Silencioso a propósito: no poder leer los límites no impide analizar
       // nada, solo hace que la interfaz use su respaldo. Un toast de error
@@ -69,11 +73,18 @@ export const useIrisStore = defineStore('iris', () => {
     return capabilities.value
   }
 
-  async function submitAnalysis({ headers, message, title } = {}) {
+  /**
+   * Envía un correo a analizar en el modo que eligió el usuario.
+   * @param {{mode?: 'headers'|'message', headers: string, message?: string|null, title?: string}} submission
+   *   Sin `mode`, se usa el mensaje completo si lo hay y las cabeceras si no.
+   * @returns {Promise<number|null>} El id del análisis creado, o null si falló.
+   */
+  async function submitAnalysis({ mode, headers, message, title } = {}) {
     submitting.value = true
     try {
-      const body = message ? { message } : { headers }
-      if (title) body.title = title
+      const body = buildSubmission({
+        mode: mode ?? (message ? MODE_MESSAGE : MODE_HEADERS), headers, message, title,
+      })
 
       const res = await apiFetch('/iris/analyze', {
         method: 'POST',
@@ -129,6 +140,12 @@ export const useIrisStore = defineStore('iris', () => {
    */
   const ARCHIVE_PER_PAGE = 20
 
+  /** Filtros del archivo sin nada puesto. Las claves son las de la query de
+   * `GET /iris/results`, y también las que guarda una vista guardada. */
+  function emptyArchiveFilters() {
+    return { search: '', verdict: '', status: '', source: '', tag: '', ioc: '', review: '' }
+  }
+
   const archive = reactive({
     items: [],
     total: 0,
@@ -136,7 +153,7 @@ export const useIrisStore = defineStore('iris', () => {
     perPage: ARCHIVE_PER_PAGE,
     loading: false,
     error: null,
-    filters: { search: '', verdict: '', status: '', source: '' },
+    filters: emptyArchiveFilters(),
     sort: { by: 'date', dir: 'desc' },
   })
 
@@ -179,7 +196,7 @@ export const useIrisStore = defineStore('iris', () => {
   }
 
   function resetArchiveFilters() {
-    archive.filters = { search: '', verdict: '', status: '', source: '' }
+    archive.filters = emptyArchiveFilters()
     archive.page = 1
     fetchArchive()
   }
@@ -201,6 +218,87 @@ export const useIrisStore = defineStore('iris', () => {
   function goToArchivePage(pg) {
     archive.page = pg
     fetchArchive()
+  }
+
+  /* ═════════════════ TRIAJE: vistas guardadas y etiquetas ═════════════ */
+
+  const savedViews = ref([])
+  const userTags = ref([])
+
+  /** Carga las vistas guardadas del usuario. */
+  async function fetchSavedViews() {
+    const res = await apiFetch('/iris/triage/views')
+    savedViews.value = res?.ok ? ((await res.json()).views ?? []) : []
+  }
+
+  /**
+   * Guarda los filtros y el orden actuales del archivo con un nombre.
+   * @param {string} name Nombre de la vista.
+   * @returns {Promise<boolean>} true si se guardó.
+   */
+  async function saveArchiveView(name) {
+    const filters = { ...archive.filters, sort_by: archive.sort.by, sort_dir: archive.sort.dir }
+    const res = await apiFetch('/iris/triage/views', { method: 'POST', body: JSON.stringify({ name, filters }) })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo guardar la vista.'), 'error')
+      return false
+    }
+    toast.show('Vista guardada.', 'success')
+    await fetchSavedViews()
+    return true
+  }
+
+  /** Aplica una vista guardada: sus filtros y su orden, desde la página 1. */
+  function applySavedView(view) {
+    const { sort_by: sortBy, sort_dir: sortDir, ...filters } = view.filters ?? {}
+    archive.filters = { ...emptyArchiveFilters(), ...filters }
+    archive.sort = { by: sortBy || 'date', dir: sortDir || 'desc' }
+    archive.page = 1
+    fetchArchive()
+  }
+
+  /** Borra una vista guardada. */
+  async function deleteSavedView(id) {
+    const res = await apiFetch(`/iris/triage/views/${id}`, { method: 'DELETE' })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo borrar la vista.'), 'error')
+      return
+    }
+    await fetchSavedViews()
+  }
+
+  /** Carga las etiquetas que usa el usuario, con cuántos análisis lleva cada una. */
+  async function fetchTags() {
+    const res = await apiFetch('/iris/tags')
+    userTags.value = res?.ok ? ((await res.json()).tags ?? []) : []
+  }
+
+  /**
+   * Sustituye las etiquetas de un análisis.
+   * @param {number} id Análisis a etiquetar.
+   * @param {string[]} tags Conjunto completo de etiquetas.
+   * @returns {Promise<string[]|null>} Las etiquetas que quedan, o null si falló.
+   */
+  async function setAnalysisTags(id, tags) {
+    const res = await apiFetch(`/iris/results/${id}/tags`, { method: 'PUT', body: JSON.stringify({ tags }) })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudieron guardar las etiquetas.'), 'error')
+      return null
+    }
+    const saved = (await res.json()).tags ?? []
+    if (currentReport.data?.analysisId === id) currentReport.data.tags = saved
+    fetchTags()
+    return saved
+  }
+
+  /**
+   * Informe de un análisis sin tocar el que se está viendo (comparación).
+   * @param {number} id Análisis.
+   * @returns {Promise<object|null>} El informe, o null si no está terminado o falló.
+   */
+  async function fetchReportById(id) {
+    const res = await apiFetch(`/iris/results/${id}`)
+    return res?.ok ? res.json() : null
   }
 
   async function getReport(id) {
@@ -377,6 +475,262 @@ export const useIrisStore = defineStore('iris', () => {
     await fetchResults()
     selectAnalysis(data.analysisId)
     return data.analysisId
+  }
+
+  /**
+   * Simulador de reglas (solo administradores): compara la política de
+   * puntuación vigente con una candidata sobre el corpus. No guarda nada.
+   * @param {object} payload Cuerpo de POST /iris/admin/replay (candidate,
+   *   includeCorpus y, opcionalmente, messages).
+   * @returns {Promise<object|null>} El informe de replay, o null si falló.
+   */
+  async function runReplay(payload) {
+    const res = await apiFetch('/iris/admin/replay', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo ejecutar el simulador de reglas.'), 'error')
+      return null
+    }
+    return res.json()
+  }
+
+  /**
+   * Registra si el veredicto de un análisis era correcto. No cambia el
+   * veredicto: se relee el informe para mostrar la corrección vigente.
+   * @param {number} id Análisis corregido.
+   * @param {{label: 'malicious'|'legitimate'|'unknown', note?: string|null}} feedback
+   * @returns {Promise<boolean>} true si se guardó.
+   */
+  async function submitFeedback(id, { label, note = null } = {}) {
+    const res = await apiFetch(`/iris/results/${id}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ label, note }),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo guardar la corrección.'), 'error')
+      return false
+    }
+    toast.show('Corrección guardada. El veredicto original no cambia.', 'success')
+    await getReport(id)
+    return true
+  }
+
+  /* ═══════════════════════ ANÁLISIS POR LOTES ══════════════════════════ */
+
+  // Lote enviado más recientemente (respuesta de POST /iris/analyze/batch,
+  // refrescada con GET /iris/batches/<id> mientras quedan análisis en curso).
+  const currentBatch = ref(null)
+  const batchSubmitting = ref(false)
+  let batchPoller = null
+  const ACTIVE_ANALYSIS_STATUSES = ['pending', 'running']
+
+  /**
+   * Envía varios .eml o un ZIP como lote y empieza a seguir su progreso.
+   * @param {File[]} files Ficheros soltados o elegidos.
+   * @returns {Promise<object|null>} El lote, o null si el servidor lo rechazó.
+   */
+  async function submitBatch(files) {
+    batchSubmitting.value = true
+    try {
+      const form = new FormData()
+      for (const file of files) form.append('files', file, file.name)
+      const res = await apiFetch('/iris/analyze/batch', { method: 'POST', body: form })
+      if (!res?.ok) {
+        toast.show(await apiError(res, 'No se pudo enviar el lote.'), 'error')
+        return null
+      }
+      currentBatch.value = await res.json()
+      const { created, duplicate, rejected, failed } = currentBatch.value.counts
+      toast.show(`Lote #${currentBatch.value.batchId}: ${created} creados, ${duplicate} repetidos, `
+        + `${rejected + failed} sin analizar.`, created ? 'success' : 'info')
+      fetchResults()
+      watchBatch(currentBatch.value.batchId)
+      return currentBatch.value
+    } finally {
+      batchSubmitting.value = false
+    }
+  }
+
+  /** Sondea el lote hasta que ninguno de sus análisis siga en cola o en curso. */
+  function watchBatch(id) {
+    stopBatchPolling()
+    let lastFinished = -1
+    batchPoller = usePolling(async () => {
+      const res = await apiFetch(`/iris/batches/${id}`)
+      if (!res?.ok) return undefined
+      currentBatch.value = await res.json()
+      const tracked = currentBatch.value.items.filter(item => item.analysisId)
+      if (!tracked.some(item => ACTIVE_ANALYSIS_STATUSES.includes(item.analysisStatus))) {
+        fetchResults()
+        return false
+      }
+      const finished = tracked.filter(item => !ACTIVE_ANALYSIS_STATUSES.includes(item.analysisStatus)).length
+      const changed = finished !== lastFinished
+      lastFinished = finished
+      return changed || undefined
+    }, { intervalMs: 3000, backoffFactor: 1.5, maxIntervalMs: 20000, immediate: false })
+    batchPoller.start()
+  }
+
+  function stopBatchPolling() {
+    batchPoller?.stop()
+    batchPoller = null
+  }
+
+  /** Cierra el panel del lote y deja de seguirlo. */
+  function closeBatch() {
+    stopBatchPolling()
+    currentBatch.value = null
+  }
+
+  /* ═══════════════════════ CASOS DE ANALISTA ══════════════════════════ */
+
+  const cases = reactive({
+    items: [],
+    total: 0,
+    countsByStatus: {},
+    loading: false,
+    filters: { status: '', priority: '', assignedToMe: false },
+  })
+  const currentCase = ref(null)
+
+  /** Carga los casos del usuario con los filtros de `cases.filters`. */
+  async function fetchCases() {
+    cases.loading = true
+    try {
+      const params = new URLSearchParams()
+      if (cases.filters.status) params.set('status', cases.filters.status)
+      if (cases.filters.priority) params.set('priority', cases.filters.priority)
+      if (cases.filters.assignedToMe) params.set('assignedToMe', 'true')
+      const res = await apiFetch(`/iris/cases?${params}`)
+      if (!res?.ok) return
+      const data = await res.json()
+      cases.items = data.cases ?? []
+      cases.total = data.total ?? 0
+      cases.countsByStatus = data.countsByStatus ?? {}
+    } finally {
+      cases.loading = false
+    }
+  }
+
+  /** Carga un caso entero (análisis y timeline) en `currentCase`. */
+  async function fetchCase(id) {
+    const res = await apiFetch(`/iris/cases/${id}`)
+    currentCase.value = res?.ok ? await res.json() : null
+    return currentCase.value
+  }
+
+  /**
+   * Petición que devuelve el caso actualizado: lo deja en `currentCase` y
+   * refresca la lista. Si falla, avisa con el mensaje del servidor.
+   * @returns {Promise<object|null>} El caso, o null si falló.
+   */
+  async function _caseRequest(url, method, body, errorText) {
+    const res = await apiFetch(url, { method, body: body === undefined ? undefined : JSON.stringify(body) })
+    if (!res?.ok) {
+      toast.show(await apiError(res, errorText), 'error')
+      return null
+    }
+    currentCase.value = await res.json()
+    fetchCases()
+    return currentCase.value
+  }
+
+  /**
+   * Abre un caso.
+   * @param {{title: string, priority?: string, analysisIds?: number[], tags?: string[]}} data
+   * @returns {Promise<object|null>} El caso abierto, o null si falló.
+   */
+  async function createCase(data) {
+    const created = await _caseRequest('/iris/cases', 'POST', data, 'No se pudo abrir el caso.')
+    if (created) toast.show(`Caso #${created.caseId} abierto.`, 'success')
+    return created
+  }
+
+  /** Cambia título, prioridad, etiquetas o asignación (`assigneeId: null` la quita). */
+  function updateCase(id, changes) {
+    return _caseRequest(`/iris/cases/${id}`, 'PATCH', changes, 'No se pudo actualizar el caso.')
+  }
+
+  /** Mueve un caso de estado; cerrarlo exige `reason`. */
+  function changeCaseStatus(id, status, reason = null) {
+    return _caseRequest(`/iris/cases/${id}/status`, 'POST', { status, reason }, 'No se pudo cambiar el estado.')
+  }
+
+  /** Añade una nota a la timeline del caso. */
+  function addCaseNote(id, note) {
+    return _caseRequest(`/iris/cases/${id}/notes`, 'POST', { note }, 'No se pudo guardar la nota.')
+  }
+
+  /** Vincula un análisis a un caso. */
+  async function linkCaseAnalysis(id, analysisId) {
+    const updated = await _caseRequest(`/iris/cases/${id}/analyses`, 'POST', { analysisId },
+      'No se pudo añadir el análisis al caso.')
+    if (updated) toast.show(`Análisis #${analysisId} añadido al caso #${id}.`, 'success')
+    return updated
+  }
+
+  /** Desvincula un análisis de un caso (el análisis no se borra). */
+  function unlinkCaseAnalysis(id, analysisId) {
+    return _caseRequest(`/iris/cases/${id}/analyses/${analysisId}`, 'DELETE', undefined,
+      'No se pudo quitar el análisis del caso.')
+  }
+
+  /* ═══════════════════ EXCEPCIONES DE CONFIANZA ═══════════════════════ */
+
+  const trustedSenders = ref([])
+  const trustedSendersLoading = ref(false)
+
+  /**
+   * Carga las excepciones de confianza del usuario.
+   * @param {boolean} includeInactive Si se incluyen también las caducadas y
+   *   las revocadas (vista de auditoría).
+   */
+  async function fetchTrustedSenders(includeInactive = false) {
+    trustedSendersLoading.value = true
+    try {
+      const params = new URLSearchParams({ includeInactive: includeInactive ? 'true' : 'false' })
+      const res = await apiFetch(`/iris/trusted-senders?${params}`)
+      if (!res?.ok) { trustedSenders.value = []; return }
+      trustedSenders.value = (await res.json()).trustedSenders ?? []
+    } finally {
+      trustedSendersLoading.value = false
+    }
+  }
+
+  /**
+   * Declara un remitente o dominio de confianza.
+   * @param {{kind: 'sender'|'domain', value: string, reason: string, expiresInDays: number}} entry
+   * @returns {Promise<object|null>} La excepción creada, o null si falló.
+   */
+  async function createTrustedSender(entry) {
+    const res = await apiFetch('/iris/trusted-senders', {
+      method: 'POST',
+      body: JSON.stringify(entry),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo guardar la excepción.'), 'error')
+      return null
+    }
+    toast.show('Excepción guardada. Se aplicará a los próximos análisis (reanaliza este para verla).', 'success')
+    return res.json()
+  }
+
+  /**
+   * Revoca una excepción. No la borra: sigue en la auditoría.
+   * @param {number} id Excepción a revocar.
+   * @returns {Promise<boolean>} true si se revocó.
+   */
+  async function revokeTrustedSender(id) {
+    const res = await apiFetch(`/iris/trusted-senders/${id}`, { method: 'DELETE' })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo revocar la excepción.'), 'error')
+      return false
+    }
+    toast.show('Excepción revocada.', 'success')
+    return true
   }
 
   /**
@@ -581,8 +935,14 @@ export const useIrisStore = defineStore('iris', () => {
     archive.page = 1
     archive.loading = false
     archive.error = null
-    archive.filters = { search: '', verdict: '', status: '', source: '' }
+    archive.filters = emptyArchiveFilters()
     archive.sort = { by: 'date', dir: 'desc' }
+    savedViews.value = []
+    userTags.value = []
+    Object.assign(cases, { items: [], total: 0, countsByStatus: {}, loading: false,
+      filters: { status: '', priority: '', assignedToMe: false } })
+    currentCase.value = null
+    closeBatch()
 
     currentId.value = null
     Object.assign(currentReport, { loading: false, data: null })
@@ -605,10 +965,16 @@ export const useIrisStore = defineStore('iris', () => {
     documents, documentsLoading,
     archive, archiveHasFilters,
     fetchArchive, setArchiveFilters, resetArchiveFilters, setArchiveSort, goToArchivePage,
+    savedViews, userTags, fetchSavedViews, saveArchiveView, applySavedView, deleteSavedView,
+    fetchTags, setAnalysisTags, fetchReportById,
+    cases, currentCase, fetchCases, fetchCase, createCase, updateCase, changeCaseStatus,
+    addCaseNote, linkCaseAnalysis, unlinkCaseAnalysis,
+    currentBatch, batchSubmitting, submitBatch, closeBatch,
+    trustedSenders, trustedSendersLoading, fetchTrustedSenders, createTrustedSender, revokeTrustedSender,
     submitAnalysis, fetchResults, getReport, getStatus, pathFor, iocsFor,
     resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,
     generateAiSummary, checkAiSummary,
-    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis,
+    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, submitFeedback, runReplay,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,
     stopDocumentPolling,

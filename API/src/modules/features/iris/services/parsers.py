@@ -146,6 +146,11 @@ _HREF_RE = re.compile(r'href\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]+>")
 _BARE_URL_RE = re.compile(r'(?<![\'"=])(https?://[^\s<>\'")]+)', re.IGNORECASE)
 
+_SUBJECT_FALLBACK_TITLE = "Correo sin asunto"
+
+#: Límite del campo ``IrisAnalysis.title`` (String(120)).
+_MAX_TITLE_LENGTH = 120
+
 
 @dataclass
 class Link:
@@ -341,26 +346,26 @@ def parse_raw_message(raw: str) -> MessageContext:
         ``MessageContext`` for why analyzing only the unwrapped inner
         message is unsafe once submissions are no longer human-forwarded.
     """
-    message = message_from_string(raw)
+    original_message = message_from_string(raw)
 
-    nested = _find_nested_forward(message)
-    if nested is not None:
+    nested_message = _find_nested_forward(original_message)
+    if nested_message is not None:
         # NOTE: deliberately read the wrapper's From/Subject via the
         # already-parsed ``msg`` object, not ``parse_raw_headers(raw)``.
         # That line-based parser has no concept of a MIME boundary — fed
-        # the *entire* raw multipart text, it happily keeps "reading
+        # the *entire* raw multipart text, it happily keeps "reading"
         # headers" past the blank-line separator and into the nested
         # part's own header block, so its last "From:"/"Subject:" match
         # ends up being the *inner* message's, silently defeating the
         # whole point of capturing the wrapper's identity.
-        context = _message_context_from(nested, nested.as_string())
+        context = _message_context_from(nested_message, nested_message.as_string())
         context.unwrapped_from_forward = True
-        context.wrapper_from = decode_mime_words(message.get("from", "") or "")
-        context.wrapper_subject = decode_mime_words(message.get("subject", "") or "")
-        context.wrapper_context = _message_context_from(message, raw)
+        context.wrapper_from = decode_mime_words(original_message.get("from", "") or "")
+        context.wrapper_subject = decode_mime_words(original_message.get("subject", "") or "")
+        context.wrapper_context = _message_context_from(original_message, raw)
         return context
 
-    return _message_context_from(message, raw)
+    return _message_context_from(original_message, raw)
 
 
 # =============================================================================
@@ -371,12 +376,6 @@ def parse_raw_message(raw: str) -> MessageContext:
 # se deriva del ``Subject`` del mensaje en vez de etiquetar el análisis como
 # "Auto (<cuenta>)" — el asunto es la etiqueta natural de un correo en el
 # historial.
-
-_SUBJECT_FALLBACK_TITLE = "Correo sin asunto"
-
-#: Límite del campo ``IrisAnalysis.title`` (String(120)).
-_MAX_TITLE_LENGTH = 120
-
 
 def build_subject_title(raw: str) -> str:
     """Título de presentación de un análisis ingerido: el asunto del mensaje.

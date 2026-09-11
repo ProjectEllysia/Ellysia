@@ -25,6 +25,7 @@ import zipfile
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
+from ..evidence import attachment_evidence, header_evidence
 from ..wordlists import (
     dangerous_extensions, esp_tracker_domains,
     macro_extensions, suspicious_mime_types,
@@ -36,7 +37,9 @@ _IMG_SRC_RE = re.compile(r'<img\b[^>]*src\s*=\s*["\']([^"\']+)["\']',
 
 
 @iris_rules.register(
-    name="External Image Tracking",
+    name="External Image Tracking", unanchorable_reason=(
+        "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
+    ), is_body_dependent=True,
     category="content_analysis", family="attachment",
     description=(
         "Detecta imágenes (u otros recursos) embebidos desde un dominio "
@@ -116,7 +119,9 @@ _SRC_RE = re.compile(r'src\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
 
 @iris_rules.register(
-    name="Image-Only Email",
+    name="Image-Only Email", unanchorable_reason=(
+        "La señal es la proporción entre imágenes y texto de todo el cuerpo, no un fragmento concreto."
+    ), is_body_dependent=True,
     category="content_analysis", family="attachment",
     description=(
         "Detecta correos cuyo contenido visible es esencialmente una sola "
@@ -323,6 +328,7 @@ def _check_headers_fallback(headers: dict) -> RuleResult:
             "content_disposition": content_disposition,
             "findings": findings,
         },
+        evidence=header_evidence(headers, ("content-disposition", "content-type")),
         recommendation=(
             f"El correo incluye archivos adjuntos con extensiones potencialmente peligrosas: "
             f"{', '.join(ext_descriptions)}. "
@@ -333,7 +339,7 @@ def _check_headers_fallback(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Suspicious Attachments", category="content_analysis", family="attachment",
+    name="Suspicious Attachments", is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="attachment",
     description=(
         "Inspecciona los adjuntos MIME reales (extensiones peligrosas, doble "
         "extensión, macros, HTML smuggling, ZIP con ejecutables); recurre a la "
@@ -348,7 +354,8 @@ def check_suspicious_attachments(context) -> RuleResult:
         return _check_headers_fallback(context.headers)
 
     findings: list[dict] = []
-    for att in attachments:
+    anchored_evidence: list[dict] = []
+    for attachment_index, att in enumerate(attachments):
         finding = _inspect_real_attachment(att)
         if not finding:
             continue
@@ -356,6 +363,7 @@ def check_suspicious_attachments(context) -> RuleResult:
         if hashes:
             finding.update(hashes)
         findings.append(finding)
+        anchored_evidence.append(attachment_evidence(attachment_index, att))
 
     if not findings:
         return RuleResult(score=0, verdict="pass", details={"attachment_count": len(attachments)})
@@ -367,6 +375,7 @@ def check_suspicious_attachments(context) -> RuleResult:
     return RuleResult(
         score=score, verdict="fail",
         details={"attachment_count": len(attachments), "findings": findings},
+        evidence=anchored_evidence,
         recommendation=(
             "El correo incluye adjuntos potencialmente peligrosos: "
             + ", ".join(finding.get("filename") or finding["reason"] for finding in findings) + ". "

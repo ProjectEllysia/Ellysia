@@ -79,6 +79,18 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/iris/confianza',
+    name: 'IrisTrust',
+    component: () => import('@/views/IrisTrustView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/iris/casos',
+    name: 'IrisCases',
+    component: () => import('@/views/IrisCasesView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/acheron',
     name: 'AcheronHub',
     component: () => import('@/views/AcheronHubView.vue'),
@@ -130,6 +142,14 @@ const routes = [
     name: 'AdminPlans',
     component: () => import('@/views/AdminPlansView.vue'),
     meta: { requiresAuth: true, requiresRoot: true },
+  },
+  {
+    // Bajo /admin y no bajo /iris: /iris es un prefijo de la API en
+    // web/Caddyfile, y una ruta del SPA ahí chocaría con él al recargar.
+    path: '/admin/iris/simulador',
+    name: 'IrisReplay',
+    component: () => import('@/views/IrisReplayView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   // Aterrizajes de los enlaces de correo. PÚBLICOS a propósito: el token es la
   // única identidad, así que el enlace tiene que funcionar en el móvil donde se

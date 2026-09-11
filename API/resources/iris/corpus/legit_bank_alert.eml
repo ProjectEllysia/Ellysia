@@ -1,0 +1,15 @@
+From: "Banco Ejemplo" <alertas@bancoejemplo.com>
+To: cliente@example.com
+Return-Path: <alertas@bancoejemplo.com>
+Subject: Alerta de seguridad: nuevo inicio de sesion detectado
+Date: Mon, 07 Sep 2026 09:30:00 +0000
+Message-ID: <alert123@bancoejemplo.com>
+Authentication-Results: mx.example.com; spf=pass smtp.mailfrom=bancoejemplo.com; dkim=pass header.d=bancoejemplo.com; dmarc=pass
+Content-Type: text/plain; charset=utf-8
+
+Estimado cliente,
+
+Hemos detectado un nuevo inicio de sesion en su cuenta desde un dispositivo desconocido. Si no reconoce esta actividad, contactenos de inmediato por telefono.
+
+Atentamente,
+Banco Ejemplo

@@ -235,10 +235,22 @@ Content-Type: application/json
 
 | Method | Endpoint | Permission | Description |
 |---|---|---|---|
-| `POST` | `/iris/analyze` | `IRIS_CREATE` | Submit email headers/content (optional: `title`) |
-| `GET` | `/iris/capabilities` | `IRIS_READ` | Server-side limits the UI must honour (max message size, min headers, accepted modes, verdict thresholds) |
+| `POST` | `/iris/analyze` | `IRIS_CREATE` | Submit email headers/content (optional: `title`). Optional `mode` (`headers` or `message`) makes the choice explicit: only the field for that mode is validated and analysed |
+| `POST` | `/iris/analyze/batch` | `IRIS_CREATE` | Analyse several `.eml` files or a ZIP at once (multipart, repeatable `files` field). Returns a summary and one item per message (`created`, `duplicate`, `rejected`, `failed`) with its analysis |
+| `GET` | `/iris/batches` · `/iris/batches/<id>` | `IRIS_READ` | Recent batches; one batch with the current status of each of its analyses |
+| `GET` | `/iris/capabilities` | `IRIS_READ` | Server-side limits the UI must honour (max message size, min headers, accepted modes, verdict thresholds), the rules headers-only mode leaves uncovered, and the full-message sensitivity notice |
 | `GET` | `/iris/status?id=` | `IRIS_READ` | Analysis progress and status; carries `failureCode`/`failureReason` when the analysis failed |
-| `GET` | `/iris/results` | `IRIS_READ` | List analyses (paginated) |
+| `GET` | `/iris/results` | `IRIS_READ` | List analyses (paginated). Filters: `search`, `verdict`, `status`, `source`, `tag`, `ioc` (searches the IOC index; defanged input such as `hxxp://evil[.]com` is accepted) and `review` (`pending` = finished and never corrected by an analyst, `reviewed`). Each item carries its `tags` and whether it was `reviewed` |
+| `PUT` | `/iris/results/<id>/tags` | `IRIS_UPDATE` | Replace an analysis' tags (the analysis itself is not modified) |
+| `GET` | `/iris/tags` | `IRIS_READ` | Tags in use and how many analyses carry each |
+| `GET`/`POST` | `/iris/triage/views` | `IRIS_READ` / `IRIS_UPDATE` | Saved combinations of list filters, by name |
+| `DELETE` | `/iris/triage/views/<id>` | `IRIS_UPDATE` | Delete a saved view |
+| `GET`/`POST` | `/iris/trusted-senders` | `IRIS_READ` / `IRIS_CREATE` | Per-user trusted senders and domains, with mandatory reason and expiry (1–365 days); `?includeInactive=true` also lists expired and revoked ones |
+| `DELETE` | `/iris/trusted-senders/<id>` | `IRIS_DELETE` | Revoke a trusted-sender exception (kept for the audit, never deleted) |
+| `POST`/`GET` | `/iris/cases` | `IRIS_CREATE` / `IRIS_READ` | Open an analyst case (optionally with analyses); list cases with `countsByStatus` and `status` / `priority` / `assignedToMe` filters |
+| `GET`/`PATCH` | `/iris/cases/<id>` | `IRIS_READ` / `IRIS_UPDATE` | A case with its analyses and timeline; change title, priority, tags or assignment |
+| `POST` | `/iris/cases/<id>/status` · `/iris/cases/<id>/notes` | `IRIS_UPDATE` | Move a case through its lifecycle (closing requires a reason); add a note to its timeline |
+| `POST`/`DELETE` | `/iris/cases/<id>/analyses[/<analysisId>]` | `IRIS_UPDATE` | Link or unlink an analysis |
 | `GET` | `/iris/results/<id>` | `IRIS_READ` | Full report with per-rule scores, analysis quality and detector version |
 | `GET` | `/iris/results/<id>/path` | `IRIS_READ` | Which rules fired and why |
 | `GET` | `/iris/results/<id>/iocs` | `IRIS_READ` | Extracted indicators of compromise |
@@ -268,6 +280,16 @@ Content-Type: application/json
 Iris applies rules across authentication (SPF, DKIM, DMARC, ARC), header anomalies, reply-chain/thread attacks, content heuristics (including QR-code/quishing detection), and domain spoofing, producing verdicts `Legitimate` / `Suspicious` / `Phishing`. Connected mailboxes are polled periodically by the scheduler and analyzed automatically; when a monitored mailbox receives mail judged `Phishing`, the user is notified by email (`iris.notify`). Thresholds are configured in `SecOpsConfig.json`.
 
 **Raw storage, redaction and retention (M09/B17/B19).** The raw email content (headers, or the full `.eml` in full-message mode) is stored encrypted at rest in its own table, `IrisRawMessage`, separate from the `IrisAnalysis` row that holds the queryable result (score, verdict, per-rule findings). This lets the raw content be purged on its own — after `iris.rawMessageRetentionDays` (90 by default) — without losing the analytical result, which is kept indefinitely unless `iris.analysisRetentionDays` is set to a positive number (`0` disables full deletion). A scheduled job on the same scheduler that polls mailboxes (`iris.retentionCheckIntervalHours`, 24 by default) applies this policy; `GET /iris/retention-policy` shows it, along with how many of the current user's analyses still have their raw retained. Once a given analysis's raw has been purged, `GET /iris/results/<id>/path` and `.../iocs` (both derived on demand from the raw) return `410 Gone`; the main result stays fully available. The exportable PDF report — the one view of an analysis that leaves the authenticated panel once downloaded — redacts email addresses, phone numbers and card-like numbers from the raw headers dump (`iris.redactPiiInReports`, on by default), except the sender/recipient/reply-to/return-path addresses already shown in the report's own summary, which are the evidence the report exists to show.
+
+**Explicit analysis mode.** The UI lets the user choose between *headers only* and the *full message* (`.eml`). `GET /iris/capabilities` publishes which rules have nothing to inspect in headers-only mode and the notice that the full message may contain sensitive data, so both are shown before submitting; `POST /iris/analyze` takes the chosen `mode` and only validates the field it will analyse.
+
+**Trusted senders.** A user can declare a sender address or domain as trusted, with a reason and an expiry, to stop a recurring false positive without touching the global configuration. An exception only applies when the message proves it comes from that sender (DMARC `pass` stated by a verifier above the trust boundary, see below), and it only neutralises the wording and layout heuristics it covers — never authentication, attachments, links, domain impersonation or structural forgeries, whose gates keep firing. Each analysis records the exception that matched (`trustApplied`): whether it applied and which rules it neutralised. Exceptions are per user, not per organisation: an organisation shares plan and billing, not data.
+
+**Triage history.** The analysis list supports saved views, analyst tags, a pending-review queue and search by indicator of compromise. IOCs of the verdict-deciding message are indexed in `IrisIndicator` when an analysis finishes and survive the raw purge; analyses finished before this index existed are only searchable by IOC after a reanalysis. Two analyses can be opened side by side, with the rules that differ listed first.
+
+**Analyst cases.** A case (`IrisCase`) groups one or several analyses — which never change — and records the human decision: status (`new` → `triage` → `contained` → `resolved` / `false_positive`; closing requires a reason and a closed case reopens to `triage`), priority, tags, assignment and a timeline of every change and note. A case can only be assigned to its owner, the only user who can see its analyses.
+
+**Batch analysis.** `POST /iris/analyze/batch` takes several `.eml` files or a ZIP and sends each message through the same `IrisManager.analyze()` as a single submission. Entries that cannot be analysed (not `.eml`, over `iris.maxMessageBytes`, encrypted, nested ZIP) are rejected one by one; ZIP entries are read with a size cap, so a decompression bomb is never fully expanded. A batch over `iris.batchMaxItems` or `iris.batchMaxTotalBytes` is rejected whole (400), and so is one that would push the user's analyses in flight over `iris.maxActiveAnalysesPerUser` (429): nothing is created in either case. A message already in the batch or already analysed by the user (same `IrisAnalysis.content_sha256`) is not analysed or charged again.
 
 **Trust boundary.** `Authentication-Results` and `Received` headers are partly written by whoever sent the message: MTAs *prepend* their own `Received`, so the lower hops are supplied by the sender and can be fabricated. Iris only trusts an `Authentication-Results` whose `authserv-id` matches a hop **above** the trust boundary — the contiguous run of hops belonging to the delivering organisation, plus any verifier listed in `features.iris.data.trusted_authserv_ids` (empty by default; without it trust is derived from the chain itself). An `ARC-Seal: cv=pass` is treated as context, never as permission to suppress SPF/DMARC/alignment gates, unless a trusted verifier confirms it with `arc=pass` in its own `Authentication-Results`.
 
@@ -470,7 +492,7 @@ cd web/app
 npm test                  # all nine suites — this is what CI runs
 
 npm run test:acheron      # schema/label correspondence + crypto interop + CRUD + sync for the Acheron vault client
-npm run test:iris         # file-intake limits (the size threshold comes from GET /iris/capabilities)
+npm run test:iris         # file intake (size limit from GET /iris/capabilities, explicit mode, batch drops) and report comparison
 npm run test:hygeia       # metric-formatting tests for the Hygeia dashboard
 npm run test:polling      # usePolling composable tests
 npm run test:element-width # useElementWidth composable tests

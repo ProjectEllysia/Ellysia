@@ -15,7 +15,7 @@ from ..wordlists import undisclosed_patterns
 
 
 @iris_rules.register(
-    name="Undisclosed Recipients", category="header_analysis",
+    name="Undisclosed Recipients", evidence_headers=("to", "cc"), category="header_analysis",
     description="Detecta si el campo To está vacío o contiene destinatarios no revelados (BCC)",
 )
 def check_undisclosed_recipients(headers: dict) -> RuleResult:

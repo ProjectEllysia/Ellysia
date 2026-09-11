@@ -1,0 +1,12 @@
+From: Acme Corp <news@acme.com>
+Reply-To: reply-abc123@reply.mailchimp.com
+Return-Path: <bounce-abc123@bounce.sendgrid.net>
+To: subscriber@example.com
+Subject: Tu boletin de mayo
+Date: Mon, 07 Sep 2026 09:30:00 +0000
+Message-ID: <abc123@mailchimp.com>
+Authentication-Results: mx.example.com; spf=pass smtp.mailfrom=bounce.sendgrid.net; dkim=pass header.d=acme.com; dmarc=pass
+List-Unsubscribe: <https://acme.com/unsubscribe>, <mailto:unsub@acme.com>
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Hola,</p><p>Aqui tienes las novedades de mayo. Gracias por seguir con nosotros y por confiar en nuestro equipo.</p><img src="https://cdn.mailchimp.com/img/logo.png" alt="logo"/></body></html>

@@ -70,13 +70,37 @@
         </div>
       </div>
 
+      <!-- Etiquetas del analista: agrupan análisis en el archivo. No cambian
+           el análisis, que sigue siendo lo que decidió Iris. -->
+      <div class="rv-tags">
+        <span v-for="tag in reportData.tags || []" :key="tag" class="rv-tag">
+          {{ tag }}
+          <button type="button" class="rv-tag-remove" :aria-label="`Quitar la etiqueta ${tag}`" @click="removeTag(tag)">&times;</button>
+        </span>
+        <form class="rv-tag-add" @submit.prevent="addTag">
+          <input v-model="newTag" type="text" maxlength="40" class="rv-tag-input" placeholder="+ etiqueta" aria-label="Añadir etiqueta" list="iris-user-tags" />
+          <datalist id="iris-user-tags"><option v-for="tag in irisStore.userTags" :key="tag.name" :value="tag.name" /></datalist>
+        </form>
+      </div>
+
       <!-- Aviso: el mensaje enviado era un reenvío que envolvía el correo -->
-      <!-- original como adjunto .eml; se analizó el interno, no el envoltorio -->
+      <!-- original como adjunto .eml. Se evalúan los dos y el informe describe -->
+      <!-- el que produjo el veredicto (winningContext); el otro queda como secundario -->
       <div v-if="reportData.unwrappedFromForward" class="rv-unwrap-notice">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="unwrap-icon"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
         <div class="unwrap-text">
           <strong>Correo reenviado como adjunto detectado.</strong>
-          Se analizó el mensaje original adjunto (.eml), no el envoltorio del reenvío.
+          <template v-if="reportData.winningContext === 'wrapper'">
+            El veredicto sale del envoltorio del reenvío, no del mensaje original adjunto.
+          </template>
+          <template v-else>
+            Se analizó el mensaje original adjunto (.eml), no el envoltorio del reenvío.
+          </template>
+          <span v-if="reportData.winningReason" class="unwrap-wrapper-info">{{ reportData.winningReason }}</span>
+          <span v-if="reportData.secondaryContext" class="unwrap-wrapper-info">
+            {{ reportData.secondaryContext.contextType === 'wrapper' ? 'Envoltorio' : 'Original' }}:
+            {{ reportData.secondaryContext.verdict }} ({{ reportData.secondaryContext.totalScore }} puntos)
+          </span>
           <span v-if="reportData.wrapperFrom || reportData.wrapperSubject" class="unwrap-wrapper-info">
             Envoltorio: <template v-if="reportData.wrapperFrom">de {{ reportData.wrapperFrom }}</template>
             <template v-if="reportData.wrapperSubject">— «{{ reportData.wrapperSubject }}»</template>
@@ -85,7 +109,94 @@
       </div>
 
       <!-- Score + Verdict hero -->
-      <IrisVerdictHero :score="reportData.totalScore" :verdict="reportData.verdict" />
+      <IrisVerdictHero
+        :score="reportData.totalScore"
+        :verdict="reportData.verdict"
+        :confidence="reportData.confidence"
+        :coverage-mode="reportData.coverage?.mode ?? null"
+      />
+
+      <!-- Incertidumbre: por qué la confianza no es alta. Va junto al veredicto
+           porque lo matiza; en solo cabeceras lista además qué reglas no
+           tuvieron cuerpo, enlaces ni adjuntos que inspeccionar. -->
+      <div v-if="uncertaintyReasons.length || uncoveredRules.length" class="rv-uncertainty">
+        <strong class="uncertainty-title">Qué limita este veredicto</strong>
+        <ul v-if="uncertaintyReasons.length" class="uncertainty-list">
+          <li v-for="(reason, i) in uncertaintyReasons" :key="i">{{ reason }}</li>
+        </ul>
+        <p v-if="uncoveredRules.length" class="uncertainty-rules">
+          Sin contenido que inspeccionar: {{ uncoveredRules.join(' · ') }}
+        </p>
+      </div>
+
+      <!-- Feedback del analista: corrige el resultado en dos clics (etiqueta y
+           Guardar). Nunca cambia el veredicto de arriba; alimenta las métricas
+           y la calibración del detector. -->
+      <div class="rv-feedback">
+        <div class="feedback-row">
+          <span class="feedback-title">¿Es correcto este veredicto?</span>
+          <div class="feedback-actions">
+            <button
+              v-for="option in FEEDBACK_OPTIONS"
+              :key="option.value"
+              type="button"
+              class="feedback-option"
+              :class="{ 'feedback-option--active': feedbackLabel === option.value }"
+              @click="feedbackLabel = option.value"
+            >{{ option.label }}</button>
+          </div>
+        </div>
+        <div v-if="feedbackLabel" class="feedback-form">
+          <textarea
+            v-model="feedbackNote"
+            class="feedback-note"
+            maxlength="2000"
+            rows="2"
+            placeholder="Nota opcional (por qué)"
+          ></textarea>
+          <button type="button" class="feedback-save" :disabled="feedbackSaving" @click="saveFeedback">
+            Guardar
+          </button>
+        </div>
+        <p v-if="reportData.latestFeedback" class="feedback-current">
+          Revisado como <strong>{{ FEEDBACK_LABELS[reportData.latestFeedback.label] }}</strong>
+          por {{ reportData.latestFeedback.author }} · {{ formatDate(reportData.latestFeedback.createdAt) }}
+          <template v-if="reportData.latestFeedback.note"> — «{{ reportData.latestFeedback.note }}»</template>
+        </p>
+        <!-- Falso positivo recurrente: confiar en el remitente para los
+             próximos análisis. No toca este veredicto. -->
+        <!-- Convertir el informe en trabajo: añadirlo a un caso de analista. -->
+        <IrisAddToCase :analysis-id="reportData.analysisId" :analysis-title="reportData.title || ''" />
+        <button v-if="!trustFormOpen" type="button" class="feedback-option trust-open" @click="trustFormOpen = true">
+          Confiar en este remitente…
+        </button>
+        <IrisTrustForm
+          v-else
+          :from-header="reportData.previewHeaders?.from ?? ''"
+          cancellable
+          @saved="trustFormOpen = false"
+          @cancel="trustFormOpen = false"
+        />
+      </div>
+
+      <!-- Excepción de confianza que coincidió con el remitente: aplicada
+           (qué reglas neutralizó) o ignorada (el mensaje no demostró venir de
+           ahí). Es parte de la explicación del veredicto. -->
+      <div v-if="reportData.trustApplied" class="rv-trust" :class="{ 'rv-trust--ignored': !reportData.trustApplied.applied }">
+        <strong class="uncertainty-title">
+          {{ reportData.trustApplied.applied ? 'Excepción de confianza aplicada' : 'Excepción de confianza no aplicada' }}
+        </strong>
+        <p class="trust-detail">
+          {{ reportData.trustApplied.kind === 'domain' ? 'Dominio' : 'Remitente' }}
+          <code>{{ reportData.trustApplied.value }}</code> — «{{ reportData.trustApplied.reason }}».
+          <template v-if="reportData.trustApplied.applied">
+            Reglas neutralizadas: {{ reportData.trustApplied.modulatedRules.join(' · ') || 'ninguna penalizaba' }}.
+          </template>
+          <template v-else>
+            El mensaje no demuestra venir de ahí, así que se analizó sin la excepción.
+          </template>
+        </p>
+      </div>
 
       <!-- Análisis degradado: alguna regla no llegó a ejecutarse, así que
            una parte del mensaje no se ha inspeccionado. Va inmediatamente
@@ -173,6 +284,7 @@
           :rule="entry.rule"
           :expanded="expandedRule === entry.i"
           @toggle="toggleRule(entry.i)"
+          @jump-evidence="jumpToEvidence"
         />
 
         <!-- Reglas superadas (pass), plegadas por defecto para no alargar el scroll -->
@@ -190,6 +302,7 @@
                 :rule="entry.rule"
                 :expanded="expandedRule === entry.i"
                 @toggle="toggleRule(entry.i)"
+                @jump-evidence="jumpToEvidence"
               />
             </div>
           </Transition>
@@ -258,7 +371,11 @@
           Cabeceras originales
         </button>
         <Transition name="raw-reveal">
-          <pre v-if="rawOpen" class="raw-block">{{ reportData.rawHeaders }}</pre>
+          <pre v-if="rawOpen" ref="rawBlock" class="raw-block"><span
+            v-for="(line, n) in rawLines"
+            :key="n"
+            :class="['raw-line', { 'raw-line--hit': n === highlightedLine }]"
+          >{{ line }}{{ '\n' }}</span></pre>
         </Transition>
       </div>
 
@@ -289,6 +406,8 @@ import IrisDocumentsModal from '@/components/iris/IrisDocumentsModal.vue'
 import IrisRuleCard from '@/components/iris/IrisRuleCard.vue'
 import IrisIocsPanel from '@/components/iris/IrisIocsPanel.vue'
 import IrisVerdictHero from '@/components/iris/IrisVerdictHero.vue'
+import IrisTrustForm from '@/components/iris/IrisTrustForm.vue'
+import IrisAddToCase from '@/components/iris/IrisAddToCase.vue'
 
 const { formatDate } = useUtils()
 const irisStore = useIrisStore()
@@ -306,6 +425,42 @@ defineEmits(['cancel', 'delete'])
 const expandedRule = ref(null)
 const rawOpen = ref(false)
 let ruleCardEls = []
+
+// Salto desde la evidencia de una regla a su línea en "Cabeceras originales".
+const rawBlock = ref(null)
+const highlightedLine = ref(null)
+const rawLines = computed(() => (props.reportData?.rawHeaders ?? '').split(/\r?\n/))
+
+/** Índice de línea de la aparición `occurrence` de la cabecera `header`, o
+ * null si no está. En un reenvío cuyo veredicto sale del original adjunto,
+ * sus cabeceras viven dentro de la parte message/rfc822: se busca a partir de
+ * ahí para no caer en la cabecera homónima del envoltorio. */
+function findHeaderLine(lines, header, occurrence) {
+  let start = 0
+  if (props.reportData?.unwrappedFromForward && props.reportData?.winningContext !== 'wrapper') {
+    const nested = lines.findIndex(line => /^content-type:\s*message\/rfc822/i.test(line))
+    if (nested >= 0) start = nested + 1
+  }
+  const escaped = header.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const prefix = new RegExp(`^${escaped}\\s*:`, 'i')
+  let seen = 0
+  for (let n = start; n < lines.length; n++) {
+    if (!prefix.test(lines[n])) continue
+    if (seen === occurrence) return n
+    seen++
+  }
+  return null
+}
+
+async function jumpToEvidence(item) {
+  const line = findHeaderLine(rawLines.value, item.locator?.header ?? '', item.locator?.occurrence ?? 0)
+  rawOpen.value = true
+  highlightedLine.value = line
+  await nextTick()
+  if (line !== null) {
+    rawBlock.value?.querySelectorAll('.raw-line')[line]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
 
 function toggleRule(i) {
   expandedRule.value = expandedRule.value === i ? null : i
@@ -335,8 +490,65 @@ const failedRuleNames = computed(() =>
 const isDegraded = computed(() =>
   props.reportData?.analysisQuality === 'degraded' || failedRuleNames.value.length > 0
 )
+// Confianza ordinal y cobertura (ver IrisVerdictHero). Los motivos y las
+// reglas sin contenido vienen ya calculados por la API: el componente no
+// reinterpreta nada, para que UI, PDF y resumen de IA digan lo mismo.
+const uncertaintyReasons = computed(() => props.reportData?.uncertaintyReasons ?? [])
+const uncoveredRules = computed(() =>
+  props.reportData?.coverage?.mode === 'headers_only'
+    ? (props.reportData.coverage.uncoveredRules ?? [])
+    : []
+)
 const passedRules = computed(() => rulesWithIndex.value.filter(entry => entry.rule.verdict === 'pass'))
 const passedRulesOpen = ref(false)
+
+// Feedback del analista (ver el bloque .rv-feedback de la plantilla).
+const FEEDBACK_OPTIONS = [
+  { value: 'malicious', label: 'Es malicioso' },
+  { value: 'legitimate', label: 'Es legítimo' },
+  { value: 'unknown', label: 'No se puede saber' },
+]
+const FEEDBACK_LABELS = { malicious: 'malicioso', legitimate: 'legítimo', unknown: 'indeterminado' }
+const feedbackLabel = ref(null)
+const feedbackNote = ref('')
+const feedbackSaving = ref(false)
+// Formulario «Confiar en este remitente» (excepción de confianza).
+const trustFormOpen = ref(false)
+// Etiqueta que se está escribiendo en la fila de etiquetas del informe.
+const newTag = ref('')
+
+/** Añade la etiqueta escrita al análisis abierto. */
+async function addTag() {
+  const tag = newTag.value.trim()
+  if (!tag) return
+  const saved = await irisStore.setAnalysisTags(props.reportData.analysisId, [...(props.reportData.tags ?? []), tag])
+  if (saved) newTag.value = ''
+}
+
+/** Quita una etiqueta del análisis abierto. */
+function removeTag(tag) {
+  irisStore.setAnalysisTags(props.reportData.analysisId, (props.reportData.tags ?? []).filter(existing => existing !== tag))
+}
+
+watch(() => props.reportData?.analysisId, () => {
+  feedbackLabel.value = null
+  feedbackNote.value = ''
+  trustFormOpen.value = false
+  newTag.value = ''
+})
+
+async function saveFeedback() {
+  feedbackSaving.value = true
+  const saved = await irisStore.submitFeedback(props.reportData.analysisId, {
+    label: feedbackLabel.value,
+    note: feedbackNote.value.trim() || null,
+  })
+  feedbackSaving.value = false
+  if (saved) {
+    feedbackLabel.value = null
+    feedbackNote.value = ''
+  }
+}
 
 // Salta a la card de la regla señalada en "Principales señales", la expande
 // y la desplaza a la vista (llamado desde los chips de topSignals). Si la
@@ -859,6 +1071,143 @@ watch(
   font-size: var(--fs-sm);
   color: var(--text-muted);
   word-break: break-word;
+}
+
+.rv-uncertainty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-med);
+  color: var(--text);
+}
+
+.uncertainty-title {
+  font-size: var(--fs-md);
+}
+
+.uncertainty-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--fs-md);
+  line-height: 1.6;
+}
+
+.uncertainty-rules {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.rv-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.feedback-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.feedback-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.feedback-option,
+.feedback-save {
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-med);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.feedback-option--active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.feedback-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.feedback-note {
+  flex: 1;
+  min-height: 2.4rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-med);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  resize: vertical;
+}
+
+.feedback-current {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.raw-line--hit {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 3px;
+}
+
+.rv-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: -0.25rem 0 0.25rem; }
+.rv-tag {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.1rem 0.25rem 0.1rem 0.55rem; font-size: var(--fs-sm);
+  background: var(--info-dim); color: var(--info); border-radius: 999px;
+}
+.rv-tag-remove { border: none; background: none; color: inherit; cursor: pointer; font-size: var(--fs-md); line-height: 1; }
+.rv-tag-input {
+  width: 8.5rem; padding: 0.15rem 0.5rem; font-size: var(--fs-sm);
+  background: transparent; color: var(--text); border: 1px dashed var(--border-med); border-radius: 999px;
+}
+.rv-tag-input:focus { outline: none; border-color: var(--accent); }
+
+.trust-open { margin-top: 0.6rem; }
+
+.rv-trust {
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(96, 128, 224, 0.25);
+  border-radius: 10px;
+  background: var(--info-dim);
+}
+.rv-trust--ignored {
+  border-color: rgba(212, 160, 74, 0.3);
+  background: var(--warn-dim);
+}
+.trust-detail {
+  margin: 0.35rem 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-dim);
 }
 
 .rv-gates {

@@ -19,6 +19,31 @@
             <span class="detail-val" :class="{ 'detail-val--empty': isEmptyValue(v) }">{{ formatDetailValue(v) }}</span>
           </div>
         </div>
+        <!-- Evidencia anclada: dónde está lo que la regla encontró. Las
+             cabeceras saltan a su línea en "Cabeceras originales"; enlaces y
+             adjuntos muestran el extracto, ya desactivado (hxxp, [.], [@]). -->
+        <div v-if="rule.evidence && rule.evidence.length" class="rule-evidence">
+          <span class="evidence-title">Evidencia</span>
+          <template v-for="(item, k) in rule.evidence" :key="k">
+            <button
+              v-if="item.kind === 'header'"
+              type="button"
+              class="evidence-item evidence-item--jump"
+              title="Ver en las cabeceras originales"
+              @click="$emit('jump-evidence', item)"
+            >
+              <span class="evidence-kind">{{ evidenceLabel(item) }}</span>
+              <code class="evidence-excerpt">{{ item.excerpt }}</code>
+            </button>
+            <div v-else class="evidence-item">
+              <span class="evidence-kind">{{ evidenceLabel(item) }}</span>
+              <code class="evidence-excerpt">{{ item.excerpt }}</code>
+            </div>
+          </template>
+        </div>
+        <p v-else-if="rule.evidenceUnavailableReason" class="evidence-unavailable">
+          Sin evidencia anclada: {{ rule.evidenceUnavailableReason }}
+        </p>
         <div v-if="rule.recommendation" class="rule-recommendation">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="rec-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           {{ rule.recommendation }}
@@ -34,7 +59,21 @@ defineProps({
   expanded: { type: Boolean, default: false },
 })
 
-defineEmits(['toggle'])
+defineEmits(['toggle', 'jump-evidence'])
+
+/** Etiqueta corta de un elemento de evidencia (ver services/evidence.py en la API). */
+function evidenceLabel(item) {
+  const locator = item.locator ?? {}
+  if (item.kind === 'header') {
+    const occurrence = locator.occurrence ? ` #${locator.occurrence + 1}` : ''
+    return `Cabecera ${locator.header}${occurrence}`
+  }
+  if (item.kind === 'url') return locator.source === 'qr_code' ? 'URL en QR' : 'Enlace'
+  if (item.kind === 'attachment') return 'Adjunto'
+  if (item.kind === 'body') return 'Cuerpo'
+  if (item.kind === 'mime_part') return 'Parte MIME'
+  return item.kind
+}
 
 function sign(s) {
   if (s > 0) return '+'
@@ -81,6 +120,58 @@ function formatDetailValue(v) {
 
 .rule-card:hover {
   border-color: var(--border-med);
+}
+
+.rule-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+
+.evidence-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.evidence-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+}
+
+.evidence-item--jump {
+  cursor: pointer;
+}
+
+.evidence-item--jump:hover {
+  border-color: var(--accent);
+}
+
+.evidence-kind {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.evidence-excerpt {
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  font-size: var(--fs-sm);
+  word-break: break-all;
+}
+
+.evidence-unavailable {
+  margin: 0 0 0.6rem;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
 }
 
 .rule-card--expanded {
@@ -189,6 +280,8 @@ function formatDetailValue(v) {
   border: 1px solid rgba(217, 108, 108, 0.15);
 }
 
+/* Regla neutralizada por una excepción de confianza del usuario. */
+.verdict-chip--trusted,
 .verdict-chip--bestguess,
 .verdict-chip--policy {
   background: var(--info-dim);

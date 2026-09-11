@@ -27,6 +27,7 @@ import re
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
+from ..evidence import attachment_evidence, header_evidence, unique_evidence
 from ..wordlists import alarming_emojis, exotic_charsets, phrase_matches, suspicious_tlds
 from ..text import (
     extract_display_name, extract_domain, is_free_provider,
@@ -61,7 +62,7 @@ def _score_by_weight(weight: int) -> tuple[float, str, str | None]:
 
 
 @iris_rules.register(
-    name="Alarming Keywords", category="content_analysis", family="content",
+    name="Alarming Keywords", evidence_headers=("subject", "from"), category="content_analysis", family="content",
     description="Detecta palabras y frases alarmantes en el asunto y nombre del remitente (inglés/español)",
 )
 def check_alarming_keywords(headers: dict) -> RuleResult:
@@ -179,7 +180,9 @@ def _has_evasive_hidden_text(body_html: str) -> bool:
 
 
 @iris_rules.register(
-    name="Body Content", category="content_analysis", family="content",
+    name="Body Content", unanchorable_reason=(
+        "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
+    ), is_body_dependent=True, category="content_analysis", family="content",
     description=(
         "Escanea el cuerpo del correo en busca de frases de phishing "
         "(credenciales/pago) y técnicas de texto oculto."
@@ -229,7 +232,9 @@ def check_body_content(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="BEC Wire Transfer Pattern",
+    name="BEC Wire Transfer Pattern", unanchorable_reason=(
+        "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
+    ), is_body_dependent=True,
     category="content_analysis", family="content",
     description=(
         "Detecta el patrón típico de BEC (Business Email Compromise): "
@@ -306,7 +311,9 @@ def check_bec_wire_pattern(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Generic Greeting",
+    name="Generic Greeting", unanchorable_reason=(
+        "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
+    ), is_body_dependent=True,
     category="content_analysis", family="content",
     description=(
         "Detecta el patrón clásico de phishing masivo: saludo genérico "
@@ -379,7 +386,7 @@ def _contains_url(text: str) -> list[str]:
 
 
 @iris_rules.register(
-    name="URL in Subject", category="content_analysis", family="content",
+    name="URL in Subject", evidence_headers=("subject",), category="content_analysis", family="content",
     description="Detecta si el asunto del correo contiene URLs (común en phishing)",
 )
 def check_url_in_subject(headers: dict) -> RuleResult:
@@ -463,7 +470,7 @@ def _mixed_script(text: str) -> str | None:
 
 
 @iris_rules.register(
-    name="Unicode Evasion", category="content_analysis", family="content",
+    name="Unicode Evasion", is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="content",
     description=(
         "Detecta caracteres de control bidireccional (RLO/LRO - spoofing de "
         "extension de archivo) y mezcla de scripts confusables (cirilico/"
@@ -480,14 +487,16 @@ def check_unicode_evasion(context) -> RuleResult:
 
     findings: list[dict] = []
     score = 0
+    anchored_evidence: list[dict] = []
 
     for field_name, value in (("subject", subject), ("from", from_header)):
         controls = _find_bidi_controls(value)
         if controls:
             findings.append({"type": "bidi_control", "field": field_name, "controls": controls})
+            anchored_evidence.extend(header_evidence(headers, (field_name,)))
             score += CR.get_iris_scoring_weight("unicode_evasion.bidi_control", -15)
 
-    for att in context.attachments:
+    for attachment_index, att in enumerate(context.attachments):
         filename = att.filename or ""
         controls = _find_bidi_controls(filename)
         if controls:
@@ -495,17 +504,21 @@ def check_unicode_evasion(context) -> RuleResult:
                 "type": "bidi_control", "field": "filename",
                 "filename": filename, "controls": controls,
             })
+            anchored_evidence.append(attachment_evidence(attachment_index, att))
             score += CR.get_iris_scoring_weight("unicode_evasion.bidi_control_filename", -15)
 
     for field_name, value in (("display_name", display_name), ("subject", subject)):
         script = _mixed_script(value)
         if script:
             findings.append({"type": "mixed_script", "field": field_name, "script": script, "value": value})
+            header_name = "from" if field_name == "display_name" else field_name
+            anchored_evidence.extend(header_evidence(headers, (header_name,)))
             score += CR.get_iris_scoring_weight("unicode_evasion.mixed_script", -10)
 
     domain_script = _mixed_script(domain)
     if domain_script:
         findings.append({"type": "mixed_script", "field": "domain", "script": domain_script, "value": domain})
+        anchored_evidence.extend(header_evidence(headers, ("from",)))
         score += CR.get_iris_scoring_weight("unicode_evasion.mixed_script_domain", -12)
 
     if not findings:
@@ -515,6 +528,7 @@ def check_unicode_evasion(context) -> RuleResult:
     return RuleResult(
         score=max(score, _unicode_evasion_score_floor()), verdict="fail",
         details={"findings": findings, "types": types},
+        evidence=unique_evidence(anchored_evidence),
         recommendation=(
             "Se detectaron caracteres Unicode sospechosos (controles de "
             "override direccional o mezcla de alfabetos) - tecnica usada para "
@@ -601,7 +615,7 @@ def _encoded_word_finding_scores() -> dict[str, float]:
 
 
 @iris_rules.register(
-    name="Encoded-Word Abuse", category="content_analysis", family="content",
+    name="Encoded-Word Abuse", evidence_headers=("subject", "from"), category="content_analysis", family="content",
     description=(
         "Detecta abuso de encoded-words RFC 2047 en Subject/From: bloques "
         "encadenados para evadir filtros de keywords, charsets exoticos "
@@ -640,7 +654,9 @@ _PHONE_RE = re.compile(r"(?:\+\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?
 
 
 @iris_rules.register(
-    name="TOAD Callback Pattern",
+    name="TOAD Callback Pattern", unanchorable_reason=(
+        "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
+    ), is_body_dependent=True,
     category="content_analysis", family="content",
     description=(
         "Detecta el patron TOAD (Telephone-Oriented Attack Delivery): un "

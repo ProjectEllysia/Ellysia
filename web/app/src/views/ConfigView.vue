@@ -231,6 +231,15 @@
               <div class="cfg-grid">
                 <div class="form-group"><label>Umbral legítimo</label><input v-model.number="store.configFlat['features.iris.legitimateThreshold']" type="number" class="inp" /></div>
                 <div class="form-group"><label>Umbral sospechoso</label><input v-model.number="store.configFlat['features.iris.suspiciousThreshold']" type="number" class="inp" /></div>
+                <div class="form-group">
+                  <label>Perfil de sensibilidad</label>
+                  <select v-model="store.configFlat['features.iris.sensitivityProfile']" class="inp sel">
+                    <option value="strict">Estricto</option>
+                    <option value="balanced">Equilibrado</option>
+                    <option value="lenient">Permisivo</option>
+                  </select>
+                  <span class="field-hint">Estricto sube los dos umbrales 5 puntos (avisa antes); permisivo los baja 5</span>
+                </div>
                 <div class="form-group"><label>Cabeceras mínimas</label><input v-model.number="store.configFlat['features.iris.minHeaders']" type="number" min="0" max="50" class="inp" /></div>
                 <div class="form-group"><label>Tamaño máx. del mensaje (bytes)</label><input v-model.number="store.configFlat['features.iris.maxMessageBytes']" type="number" min="1024" step="1024" class="inp" /><span class="field-hint">10485760 = 10 MiB</span></div>
               </div>

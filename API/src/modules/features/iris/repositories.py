@@ -10,15 +10,18 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import and_, asc, delete, desc, nullslast, select, update
-from sqlalchemy.orm import joinedload
+from sqlalchemy import and_, asc, delete, desc, func, nullslast, select, update
+from sqlalchemy.orm import joinedload, selectinload
 
 from src.modules.infrastructure import BaseRepository, DocumentRepository
 from src.modules.shared import utcnow_naive
 
 from .model import (
+    IrisAnalystFeedback,
     IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisNotificationPreference,
-    IrisRawMessage, IrisRuleResult, IrisDocument,
+    IrisRawMessage, IrisRuleResult, IrisDocument, IrisTrustedSender,
+    IrisAnalysisTag, IrisIndicator, IrisSavedView,
+    IrisCase, IrisCaseAnalysis, IrisCaseEvent, IrisBatch, IrisBatchItem,
 )
 
 
@@ -63,6 +66,7 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         self, user_id: int, page: int, per_page: int, *,
         search: str | None = None, verdict: str | None = None,
         status: str | None = None, source: str | None = None,
+        tag: str | None = None, ioc: str | None = None, review: str | None = None,
         sort_by: str = "date", sort_dir: str = "desc",
     ) -> Tuple[List[IrisAnalysis], int]:
         """Return a page of analyses for a user plus the total count.
@@ -76,6 +80,11 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
             status: Optional exact match on ``status``.
             source: "manual" (``connection_id IS NULL``) or "mailbox"
                 (``connection_id IS NOT NULL``); ``None`` = no filter.
+            tag: Solo los análisis con esta etiqueta exacta; ``None`` = sin filtro.
+            ioc: Solo los análisis cuyo índice de IOCs contiene este texto
+                (ya normalizado por el llamante); ``None`` = sin filtro.
+            review: ``pending`` (terminados y sin ninguna corrección del
+                analista) o ``reviewed`` (con al menos una); ``None`` = sin filtro.
             sort_by: One of ``_SORTABLE_COLUMNS`` — validated upstream by
                 ``ResultsQuerySchema``.
             sort_dir: "asc" or "desc".
@@ -85,9 +94,22 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         """
         query = (
             self._session.query(IrisAnalysis)
-            .options(joinedload(IrisAnalysis.connection))
+            .options(joinedload(IrisAnalysis.connection), selectinload(IrisAnalysis.tags))
             .filter(IrisAnalysis.user_id == user_id)
         )
+        if tag:
+            query = query.filter(IrisAnalysis.id.in_(
+                select(IrisAnalysisTag.analysis_id).where(IrisAnalysisTag.name == tag)
+            ))
+        if ioc:
+            query = query.filter(IrisAnalysis.id.in_(
+                select(IrisIndicator.analysis_id).where(IrisIndicator.value.contains(ioc, autoescape=True))
+            ))
+        reviewed_ids = select(IrisAnalystFeedback.analysis_id)
+        if review == "pending":
+            query = query.filter(IrisAnalysis.status == "finished", IrisAnalysis.id.notin_(reviewed_ids))
+        elif review == "reviewed":
+            query = query.filter(IrisAnalysis.id.in_(reviewed_ids))
         if search:
             query = query.filter(IrisAnalysis.title.ilike(f"%{search}%"))
         if verdict:
@@ -134,6 +156,39 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
                 IrisAnalysis.source_message_uid == source_message_uid,
             )
             .first()
+        )
+
+    def get_by_user_and_fingerprint(self, user_id: int, fingerprint: str) -> Optional[IrisAnalysis]:
+        """El análisis más reciente de un usuario con esta huella de contenido.
+
+        Args:
+            user_id: Dueño de los análisis.
+            fingerprint: ``IrisAnalysis.content_sha256`` buscada.
+
+        Returns:
+            Optional[IrisAnalysis]: El análisis, o ``None`` si ese mensaje no se
+                ha analizado nunca (o solo antes de que existiera la huella).
+        """
+        return (
+            self._session.query(IrisAnalysis)
+            .filter(IrisAnalysis.user_id == user_id, IrisAnalysis.content_sha256 == fingerprint)
+            .order_by(IrisAnalysis.id.desc())
+            .first()
+        )
+
+    def count_active_by_user(self, user_id: int) -> int:
+        """Cuántos análisis de un usuario están pendientes o en curso.
+
+        Args:
+            user_id: Dueño de los análisis.
+
+        Returns:
+            int: Análisis en ``pending`` o ``running``.
+        """
+        return (
+            self._session.query(IrisAnalysis.id)
+            .filter(IrisAnalysis.user_id == user_id, IrisAnalysis.status.in_(["pending", "running"]))
+            .count()
         )
 
     def exists_by_source(self, connection_id: int, source_message_uid: str) -> bool:
@@ -198,6 +253,24 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         """Cuántos análisis tiene este usuario en total -- para el informe
         de retención, que necesita el denominador."""
         return self._session.query(IrisAnalysis.id).filter(IrisAnalysis.user_id == user_id).count()
+
+    def count_finished_by_user(self, user_id: int) -> int:
+        """Cuántos análisis terminados tiene un usuario.
+
+        Es el denominador de la cobertura de feedback: solo un análisis
+        terminado tiene un veredicto que el analista pueda corregir.
+
+        Args:
+            user_id: Dueño de los análisis.
+
+        Returns:
+            int: Número de análisis en estado ``finished``.
+        """
+        return (
+            self._session.query(IrisAnalysis.id)
+            .filter(IrisAnalysis.user_id == user_id, IrisAnalysis.status == "finished")
+            .count()
+        )
 
     def count_with_raw_retained_by_user(self, user_id: int) -> int:
         """De los análisis de este usuario, cuántos conservan todavía su
@@ -496,20 +569,119 @@ class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
 
     _MODEL = IrisRuleResult
 
-    def get_by_analysis(self, analysis_id: int) -> List[IrisRuleResult]:
-        """Return all rule results for an analysis, ordered by position."""
-        return (
-            self._session.query(IrisRuleResult)
-            .filter(IrisRuleResult.analysis_id == analysis_id)
-            .order_by(IrisRuleResult.position)
-            .all()
+    def get_by_analysis(self, analysis_id: int,
+                        context_type: Optional[str] = None) -> List[IrisRuleResult]:
+        """Filas de regla de un análisis, ordenadas por posición.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis``.
+            context_type: Si se da (``"inner"`` o ``"wrapper"``), solo las
+                filas de ese contexto del reenvío. Por defecto ``None``:
+                todas las filas, de cualquier contexto.
+
+        Returns:
+            List[IrisRuleResult]: Las filas pedidas; lista vacía si no hay.
+        """
+        query = self._session.query(IrisRuleResult).filter(
+            IrisRuleResult.analysis_id == analysis_id
         )
+        if context_type is not None:
+            query = query.filter(IrisRuleResult.context_type == context_type)
+        return query.order_by(IrisRuleResult.position).all()
 
     def delete_by_analysis(self, analysis_id: int) -> None:
         """Delete all rule results belonging to an analysis."""
         self._session.query(IrisRuleResult).filter(
             IrisRuleResult.analysis_id == analysis_id
         ).delete()
+
+
+class IrisAnalystFeedbackRepository(BaseRepository[IrisAnalystFeedback]):
+    """Acceso a las correcciones del analista (``IrisAnalystFeedback``).
+
+    Cada corrección es una fila nueva; la vigente de un análisis es la de
+    ``id`` más alto, que crece junto con ``created_at``.
+    """
+
+    _MODEL = IrisAnalystFeedback
+
+    def get_by_analysis(self, analysis_id: int) -> List[IrisAnalystFeedback]:
+        """Historial de correcciones de un análisis, de la más reciente a la más antigua.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis``.
+
+        Returns:
+            List[IrisAnalystFeedback]: Las correcciones; lista vacía si no hay.
+        """
+        return (
+            self._session.query(IrisAnalystFeedback)
+            .filter(IrisAnalystFeedback.analysis_id == analysis_id)
+            .order_by(IrisAnalystFeedback.id.desc())
+            .all()
+        )
+
+    def latest_for_analysis(self, analysis_id: int) -> Optional[IrisAnalystFeedback]:
+        """Corrección vigente de un análisis.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis``.
+
+        Returns:
+            Optional[IrisAnalystFeedback]: La más reciente, o ``None`` si
+                nadie lo ha revisado.
+        """
+        return (
+            self._session.query(IrisAnalystFeedback)
+            .filter(IrisAnalystFeedback.analysis_id == analysis_id)
+            .order_by(IrisAnalystFeedback.id.desc())
+            .first()
+        )
+
+    def get_reviewed_ids(self, analysis_ids: List[int]) -> set[int]:
+        """De una lista de análisis, cuáles tienen al menos una corrección.
+
+        Args:
+            analysis_ids: Primary keys de los análisis a mirar.
+
+        Returns:
+            set[int]: Los que un analista ha revisado; vacío si ninguno.
+        """
+        if not analysis_ids:
+            return set()
+        rows = (
+            self._session.query(IrisAnalystFeedback.analysis_id)
+            .filter(IrisAnalystFeedback.analysis_id.in_(analysis_ids))
+            .distinct()
+            .all()
+        )
+        return {row[0] for row in rows}
+
+    def latest_per_analysis_for_user(self, user_id: int) -> List[IrisAnalystFeedback]:
+        """La corrección vigente de cada análisis revisado de un usuario.
+
+        Es la entrada de las métricas: una etiqueta por análisis (la última),
+        no una por corrección, para que cambiar de opinión no cuente dos veces.
+
+        Args:
+            user_id: Dueño de los análisis.
+
+        Returns:
+            List[IrisAnalystFeedback]: Una fila por análisis revisado, con su
+                ``analysis`` ya cargado.
+        """
+        latest_ids = (
+            select(func.max(IrisAnalystFeedback.id))
+            .join(IrisAnalysis, IrisAnalysis.id == IrisAnalystFeedback.analysis_id)
+            .where(IrisAnalysis.user_id == user_id)
+            .group_by(IrisAnalystFeedback.analysis_id)
+        )
+        return (
+            self._session.query(IrisAnalystFeedback)
+            .options(joinedload(IrisAnalystFeedback.analysis))
+            .filter(IrisAnalystFeedback.id.in_(latest_ids))
+            .all()
+        )
 
 
 class IrisNotificationPreferenceRepository(BaseRepository[IrisNotificationPreference]):
@@ -542,6 +714,291 @@ class IrisNotificationPreferenceRepository(BaseRepository[IrisNotificationPrefer
             )
             .all()
         )
+
+
+class IrisTrustedSenderRepository(BaseRepository[IrisTrustedSender]):
+    """Acceso a las excepciones de confianza (``IrisTrustedSender``).
+
+    Las filas no se borran al revocarse: la auditoría necesita las caducadas y
+    las revocadas tanto como las activas.
+    """
+
+    _MODEL = IrisTrustedSender
+
+    def get_by_user(self, user_id: int) -> List[IrisTrustedSender]:
+        """Todas las excepciones de un usuario, de la más reciente a la más antigua.
+
+        Args:
+            user_id: Dueño de las excepciones.
+
+        Returns:
+            List[IrisTrustedSender]: Activas, caducadas y revocadas; lista
+                vacía si no tiene ninguna.
+        """
+        return (
+            self._session.query(IrisTrustedSender)
+            .filter(IrisTrustedSender.user_id == user_id)
+            .order_by(IrisTrustedSender.id.desc())
+            .all()
+        )
+
+    def get_active_for_user(self, user_id: int, now: datetime) -> List[IrisTrustedSender]:
+        """Excepciones de un usuario que siguen en vigor en un instante.
+
+        Args:
+            user_id: Dueño de las excepciones.
+            now: Instante de referencia (UTC naive).
+
+        Returns:
+            List[IrisTrustedSender]: Las no revocadas cuya caducidad es
+                posterior a ``now``.
+        """
+        return (
+            self._session.query(IrisTrustedSender)
+            .filter(
+                IrisTrustedSender.user_id == user_id,
+                IrisTrustedSender.revoked_at.is_(None),
+                IrisTrustedSender.expires_at > now,
+            )
+            .order_by(IrisTrustedSender.id.asc())
+            .all()
+        )
+
+    def has_active(self, user_id: int, kind: str, value: str, now: datetime) -> bool:
+        """Si el usuario ya tiene en vigor una excepción idéntica.
+
+        Args:
+            user_id: Dueño de las excepciones.
+            kind: ``sender`` o ``domain``.
+            value: Valor ya normalizado.
+            now: Instante de referencia (UTC naive).
+
+        Returns:
+            bool: ``True`` si hay una no revocada y no caducada con ese tipo y
+                valor.
+        """
+        return (
+            self._session.query(IrisTrustedSender.id)
+            .filter(
+                IrisTrustedSender.user_id == user_id,
+                IrisTrustedSender.kind == kind,
+                IrisTrustedSender.value == value,
+                IrisTrustedSender.revoked_at.is_(None),
+                IrisTrustedSender.expires_at > now,
+            )
+            .first()
+        ) is not None
+
+
+class IrisSavedViewRepository(BaseRepository[IrisSavedView]):
+    """Acceso a las vistas guardadas del historial (``IrisSavedView``)."""
+
+    _MODEL = IrisSavedView
+
+    def get_by_user(self, user_id: int) -> List[IrisSavedView]:
+        """Vistas de un usuario, por nombre.
+
+        Args:
+            user_id: Dueño de las vistas.
+
+        Returns:
+            List[IrisSavedView]: Las vistas; lista vacía si no tiene.
+        """
+        return (
+            self._session.query(IrisSavedView)
+            .filter(IrisSavedView.user_id == user_id)
+            .order_by(IrisSavedView.name.asc())
+            .all()
+        )
+
+    def count_by_user(self, user_id: int) -> int:
+        """Cuántas vistas tiene guardadas un usuario.
+
+        Args:
+            user_id: Dueño de las vistas.
+
+        Returns:
+            int: Número de vistas.
+        """
+        return self._session.query(IrisSavedView.id).filter(IrisSavedView.user_id == user_id).count()
+
+    def get_by_user_and_name(self, user_id: int, name: str) -> Optional[IrisSavedView]:
+        """Vista de un usuario con un nombre exacto.
+
+        Args:
+            user_id: Dueño de las vistas.
+            name: Nombre ya recortado.
+
+        Returns:
+            Optional[IrisSavedView]: La vista, o ``None`` si no hay ninguna con ese nombre.
+        """
+        return (
+            self._session.query(IrisSavedView)
+            .filter(IrisSavedView.user_id == user_id, IrisSavedView.name == name)
+            .first()
+        )
+
+
+class IrisAnalysisTagRepository(BaseRepository[IrisAnalysisTag]):
+    """Acceso a las etiquetas de los análisis (``IrisAnalysisTag``)."""
+
+    _MODEL = IrisAnalysisTag
+
+    def delete_by_analysis(self, analysis_id: int) -> None:
+        """Quita todas las etiquetas de un análisis.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis``.
+        """
+        self._session.query(IrisAnalysisTag).filter(IrisAnalysisTag.analysis_id == analysis_id).delete()
+
+    def count_by_name_for_user(self, user_id: int) -> List[Tuple[str, int]]:
+        """Etiquetas que usa un usuario y en cuántos análisis aparece cada una.
+
+        Args:
+            user_id: Dueño de los análisis.
+
+        Returns:
+            List[Tuple[str, int]]: ``(nombre, análisis)``, de la más usada a la
+                menos y, a igual uso, por nombre.
+        """
+        count = func.count(IrisAnalysisTag.id)
+        return [
+            (name, total) for name, total in (
+                self._session.query(IrisAnalysisTag.name, count)
+                .join(IrisAnalysis, IrisAnalysis.id == IrisAnalysisTag.analysis_id)
+                .filter(IrisAnalysis.user_id == user_id)
+                .group_by(IrisAnalysisTag.name)
+                .order_by(count.desc(), IrisAnalysisTag.name.asc())
+                .all()
+            )
+        ]
+
+
+class IrisIndicatorRepository(BaseRepository[IrisIndicator]):
+    """Acceso al índice de IOCs (``IrisIndicator``).
+
+    Las búsquedas por IOC las hace ``IrisAnalysisRepository.get_by_user_paginated``,
+    que es donde se combinan con el resto de filtros del historial.
+    """
+
+    _MODEL = IrisIndicator
+
+
+class IrisCaseRepository(BaseRepository[IrisCase]):
+    """Acceso a los casos de analista (``IrisCase``)."""
+
+    _MODEL = IrisCase
+
+    def get_by_user_filtered(self, user_id: int, *, status: Optional[str] = None,
+                             priority: Optional[str] = None,
+                             assignee_id: Optional[int] = None) -> List[IrisCase]:
+        """Casos de un usuario, del modificado más recientemente al más antiguo.
+
+        Args:
+            user_id: Dueño de los casos.
+            status: Solo los de este estado. Por defecto ``None``: todos.
+            priority: Solo los de esta prioridad. Por defecto ``None``: todas.
+            assignee_id: Solo los asignados a este usuario. Por defecto
+                ``None``: sin filtro.
+
+        Returns:
+            List[IrisCase]: Los casos, con sus vínculos y su asignado cargados.
+        """
+        query = (
+            self._session.query(IrisCase)
+            .options(selectinload(IrisCase.links), joinedload(IrisCase.assignee))
+            .filter(IrisCase.user_id == user_id)
+        )
+        if status:
+            query = query.filter(IrisCase.status == status)
+        if priority:
+            query = query.filter(IrisCase.priority == priority)
+        if assignee_id is not None:
+            query = query.filter(IrisCase.assignee_id == assignee_id)
+        return query.order_by(IrisCase.updated_at.desc(), IrisCase.id.desc()).all()
+
+    def count_by_status_for_user(self, user_id: int) -> dict:
+        """Cuántos casos tiene un usuario en cada estado.
+
+        Args:
+            user_id: Dueño de los casos.
+
+        Returns:
+            dict: ``{estado: casos}``, solo con los estados que tienen alguno.
+        """
+        rows = (
+            self._session.query(IrisCase.status, func.count(IrisCase.id))
+            .filter(IrisCase.user_id == user_id)
+            .group_by(IrisCase.status)
+            .all()
+        )
+        return {status: total for status, total in rows}
+
+
+class IrisCaseAnalysisRepository(BaseRepository[IrisCaseAnalysis]):
+    """Acceso a los vínculos entre casos y análisis (``IrisCaseAnalysis``)."""
+
+    _MODEL = IrisCaseAnalysis
+
+    def get_link(self, case_id: int, analysis_id: int) -> Optional[IrisCaseAnalysis]:
+        """El vínculo entre un caso y un análisis, si existe.
+
+        Args:
+            case_id: Primary key del caso.
+            analysis_id: Primary key del análisis.
+
+        Returns:
+            Optional[IrisCaseAnalysis]: El vínculo, o ``None``.
+        """
+        return (
+            self._session.query(IrisCaseAnalysis)
+            .filter(IrisCaseAnalysis.case_id == case_id, IrisCaseAnalysis.analysis_id == analysis_id)
+            .first()
+        )
+
+
+class IrisCaseEventRepository(BaseRepository[IrisCaseEvent]):
+    """Acceso a la timeline de los casos (``IrisCaseEvent``).
+
+    Los eventos se leen a través de ``IrisCase.events``; aquí solo se guardan.
+    """
+
+    _MODEL = IrisCaseEvent
+
+
+class IrisBatchRepository(BaseRepository[IrisBatch]):
+    """Acceso a los lotes de mensajes (``IrisBatch``)."""
+
+    _MODEL = IrisBatch
+
+    def get_recent_by_user(self, user_id: int, limit: int) -> List[IrisBatch]:
+        """Lotes más recientes de un usuario.
+
+        Args:
+            user_id: Dueño de los lotes.
+            limit: Cuántos como máximo.
+
+        Returns:
+            List[IrisBatch]: Del más nuevo al más antiguo, con sus elementos cargados.
+        """
+        return (
+            self._session.query(IrisBatch)
+            .options(selectinload(IrisBatch.items))
+            .filter(IrisBatch.user_id == user_id)
+            .order_by(IrisBatch.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+
+class IrisBatchItemRepository(BaseRepository[IrisBatchItem]):
+    """Acceso a los elementos de los lotes (``IrisBatchItem``).
+
+    Se leen a través de ``IrisBatch.items``; aquí solo se guardan.
+    """
+
+    _MODEL = IrisBatchItem
 
 
 class IrisReportRepository(DocumentRepository[IrisDocument]):

@@ -75,6 +75,47 @@ export function classifyIntake(file, capabilities) {
   }
 }
 
+/** Modos de análisis que acepta `POST /iris/analyze` en su campo `mode`. */
+export const MODE_HEADERS = 'headers'
+export const MODE_MESSAGE = 'message'
+
+/**
+ * Cuerpo de `POST /iris/analyze` para el modo que eligió el usuario.
+ *
+ * El modo viaja explícito y solo se envía el campo de ese modo: el servidor
+ * valida únicamente lo que va a analizar, así que elegir «solo cabeceras»
+ * sobre un `.eml` enorme no puede acabar en un rechazo por el tamaño de un
+ * mensaje que no se usa. El modo completo sin mensaje cargado cae a cabeceras
+ * en vez de enviar una petición que el servidor rechazaría.
+ *
+ * @param {{mode: string, headers: string, message?: string|null, title?: string}} input
+ * @returns {{mode: string, headers?: string, message?: string, title?: string}}
+ */
+export function buildSubmission({ mode, headers, message, title }) {
+  const body = mode === MODE_MESSAGE && message
+    ? { mode: MODE_MESSAGE, message }
+    : { mode: MODE_HEADERS, headers }
+  if (title) body.title = title
+  return body
+}
+
+/** ¿Es un ZIP? Por extensión o por tipo MIME, igual que `isEmlFile`. */
+export function isZipFile(file) {
+  if (!file) return false
+  return /\.zip$/i.test(file.name ?? '') || ['application/zip', 'application/x-zip-compressed'].includes(file.type)
+}
+
+/**
+ * ¿Se analiza como lote? Sí si llega más de un fichero o algún ZIP: un `.eml`
+ * suelto sigue el camino de siempre (se carga en el formulario para elegir el
+ * modo), y lo demás va a `POST /iris/analyze/batch`, que es quien decide qué
+ * entra y qué se rechaza.
+ */
+export function isBatchDrop(files) {
+  const list = Array.from(files ?? [])
+  return list.length > 1 || list.some(isZipFile)
+}
+
 /** Tamaño legible para el aviso que ve el usuario ("10 MB"). */
 export function formatByteLimit(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return ''

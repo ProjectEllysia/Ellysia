@@ -103,14 +103,11 @@ def test_a_message_at_the_published_limit_is_accepted(client, regular_user, auth
     import src.modules.features.iris.schemas as schemas_mod
     import src.modules.features.iris.managers.analysis as analysis_mod
 
-    class _Limited:
-        max_message_bytes = 2048
-        min_headers = 2
-        legitimate_threshold = 80
-        suspicious_threshold = 55
-
-    monkeypatch.setattr(schemas_mod.CR, "iris_config", lambda: _Limited())
-    monkeypatch.setattr(analysis_mod.CR, "iris_config", lambda: _Limited())
+    # Un IrisConfig real con solo el límite cambiado: un doble escrito a mano
+    # se queda corto en cuanto el endpoint lee un campo más de la config.
+    limited = schemas_mod.CR.IrisConfig(max_message_bytes=2048)
+    monkeypatch.setattr(schemas_mod.CR, "iris_config", lambda: limited)
+    monkeypatch.setattr(analysis_mod.CR, "iris_config", lambda: limited)
 
     limit = client.get("/iris/capabilities",
                        headers=auth_headers(regular_user)).get_json()["maxMessageBytes"]
@@ -134,14 +131,11 @@ def test_a_message_over_the_published_limit_is_rejected(client, regular_user, au
     import src.modules.features.iris.schemas as schemas_mod
     import src.modules.features.iris.managers.analysis as analysis_mod
 
-    class _Limited:
-        max_message_bytes = 2048
-        min_headers = 2
-        legitimate_threshold = 80
-        suspicious_threshold = 55
-
-    monkeypatch.setattr(schemas_mod.CR, "iris_config", lambda: _Limited())
-    monkeypatch.setattr(analysis_mod.CR, "iris_config", lambda: _Limited())
+    # Un IrisConfig real con solo el límite cambiado: un doble escrito a mano
+    # se queda corto en cuanto el endpoint lee un campo más de la config.
+    limited = schemas_mod.CR.IrisConfig(max_message_bytes=2048)
+    monkeypatch.setattr(schemas_mod.CR, "iris_config", lambda: limited)
+    monkeypatch.setattr(analysis_mod.CR, "iris_config", lambda: limited)
 
     limit = client.get("/iris/capabilities",
                        headers=auth_headers(regular_user)).get_json()["maxMessageBytes"]

@@ -22,6 +22,7 @@ import src.modules.features.iris.managers.analysis as managers_mod
 from src.modules.features.iris.managers.analysis import IrisManager
 from src.modules.features.iris.model import IrisAnalysis
 from src.modules.features.iris.repositories import IrisAnalysisRepository, IrisRuleResultRepository
+from src.modules.features.iris.services.contexts import CONTEXT_INNER, ContextEvaluation
 from src.modules.features.iris.services.quality import AnalysisQuality
 from src.modules.features.iris.services.registry import RuleResult
 from src.modules.infrastructure import UnitOfWork
@@ -194,11 +195,14 @@ def test_persist_analysis_results_does_not_overwrite_a_cancellation(app, regular
         IrisManager._persist_analysis_results(
             analysis_id,
             rules_defs=[{"name": "SPF", "category": "auth"}],
-            results=[RuleResult(
-                score=-10.0, verdict="fail", details={}, recommendation="revisa SPF",
-            )],
-            verdict="Phishing", total_score=10.0, gate_reasons=[],
-            quality=AnalysisQuality(quality="complete"), detector="test:1",
+            winner=ContextEvaluation(
+                context_type=CONTEXT_INNER, verdict="Phishing", total_score=10.0,
+                gate_reasons=[], quality=AnalysisQuality(quality="complete"),
+                results=[RuleResult(
+                    score=-10.0, verdict="fail", details={}, recommendation="revisa SPF",
+                )],
+            ),
+            detector="test:1",
         )
 
     reloaded = _reload(app, analysis_id)
@@ -222,9 +226,12 @@ def test_persist_analysis_results_finishes_a_still_running_analysis(app, regular
         IrisManager._persist_analysis_results(
             analysis_id,
             rules_defs=[{"name": "SPF", "category": "auth"}],
-            results=[RuleResult(score=2.0, verdict="pass", details={})],
-            verdict="Legitimate", total_score=90.0, gate_reasons=[],
-            quality=AnalysisQuality(quality="complete"), detector="test:1",
+            winner=ContextEvaluation(
+                context_type=CONTEXT_INNER, verdict="Legitimate", total_score=90.0,
+                gate_reasons=[], quality=AnalysisQuality(quality="complete"),
+                results=[RuleResult(score=2.0, verdict="pass", details={})],
+            ),
+            detector="test:1",
         )
 
     reloaded = _reload(app, analysis_id)

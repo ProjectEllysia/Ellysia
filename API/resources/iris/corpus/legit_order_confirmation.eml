@@ -1,0 +1,16 @@
+From: Acme Store <orders@acmestore.com>
+Reply-To: reply@postmarkapp.com
+Return-Path: <bounce@postmarkapp.com>
+To: buyer@example.com
+Subject: Your order #48213 has shipped
+Date: Mon, 07 Sep 2026 09:30:00 +0000
+Message-ID: <order48213@postmarkapp.com>
+Authentication-Results: mx.example.com; spf=pass smtp.mailfrom=postmarkapp.com; dkim=pass header.d=acmestore.com; dmarc=pass
+Content-Type: text/plain; charset=utf-8
+
+Hi there,
+
+Good news! Your order #48213 has shipped and is on its way. You can track your package using the link in your account.
+
+Thanks for shopping with us,
+Acme Store

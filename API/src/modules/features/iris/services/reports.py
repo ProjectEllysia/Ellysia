@@ -366,23 +366,30 @@ class IrisPDFCreator:
         se resalta porque una discrepancia entre ambos es una señal clásica
         de fraude BEC (el atacante quiere que las respuestas vayan a un
         buzón distinto del remitente que se ve a simple vista).
+
+        Las cabeceras salen de ``previewHeaders``, que el manager toma del
+        contexto que produjo el veredicto; si el informe no las trae (un
+        informe construido a mano), se leen del raw.
         """
-        raw = self.report.get("rawHeaders")
-        if not raw:
-            return
+        preview = self.report.get("previewHeaders")
+        if preview is None:
+            raw = self.report.get("rawHeaders")
+            if not raw:
+                return
+            headers = parse_raw_headers(raw)
+            preview = {
+                key: (decode_mime_words(headers[name]) if headers.get(name) else None)
+                for name, key in (("subject", "subject"), ("from", "from"), ("to", "to"),
+                                  ("reply-to", "replyTo"), ("return-path", "returnPath"),
+                                  ("date", "date"))
+            }
 
-        headers = parse_raw_headers(raw)
-
-        def _get(name: str) -> Optional[str]:
-            value = headers.get(name)
-            return decode_mime_words(value) if value else None
-
-        subject = _get("subject")
-        from_ = _get("from")
-        to_address = _get("to")
-        reply_to = _get("reply-to")
-        return_path = _get("return-path")
-        date = _get("date")
+        subject = preview.get("subject")
+        from_ = preview.get("from")
+        to_address = preview.get("to")
+        reply_to = preview.get("replyTo")
+        return_path = preview.get("returnPath")
+        date = preview.get("date")
 
         if not any([subject, from_, to_address, reply_to, return_path, date]):
             return
@@ -446,14 +453,77 @@ class IrisPDFCreator:
             elements.append(Spacer(1, 0.1 * inch))
             wrapper_from = self.report.get("wrapperFrom")
             wrapper_subject = self.report.get("wrapperSubject")
-            note = "Este análisis corresponde al correo original reenviado"
+            if self.report.get("winningContext") == "wrapper":
+                note = "Este análisis corresponde al envoltorio del reenvío"
+            else:
+                note = "Este análisis corresponde al correo original reenviado"
             if wrapper_from:
                 note += f" por {_esc(wrapper_from)}"
             if wrapper_subject:
                 note += f" (asunto del reenvío: «{_esc(wrapper_subject)}»)"
             note += "."
+            winning_reason = self.report.get("winningReason")
+            if winning_reason:
+                note += f" {_esc(winning_reason)}"
+            secondary = self.report.get("secondaryContext")
+            if secondary:
+                note += (
+                    f" El otro mensaje ({'envoltorio' if secondary.get('contextType') == 'wrapper' else 'original'})"
+                    f" obtuvo {_esc(secondary.get('verdict'))} con {_esc(secondary.get('totalScore'))} puntos."
+                )
             elements.append(Paragraph(note, theme.body))
 
+        elements.append(Spacer(1, 0.22 * inch))
+
+    _CONFIDENCE_LABELS = {"high": "Alta", "medium": "Media", "low": "Baja"}
+
+    #: Extractos de evidencia por hallazgo en el PDF; el resto se resume.
+    _EVIDENCE_PER_RULE = 3
+
+    def append_confidence(self, elements: list, theme: IrisReportTheme) -> None:
+        """Confianza y cobertura del veredicto, justo debajo de él.
+
+        Usa la misma semántica que la API y la UI: una confianza ordinal
+        (alta/media/baja), nunca un porcentaje, con sus motivos, y si se
+        inspeccionó el mensaje completo o solo sus cabeceras. No aparece en
+        informes de análisis anteriores a que se calculara.
+
+        Args:
+            elements: Lista de flowables del documento, a la que se añade.
+            theme: Tema del informe (estilos y paleta).
+        """
+        label = self._CONFIDENCE_LABELS.get(self.report.get("confidence") or "")
+        if label is None:
+            return
+
+        coverage = self.report.get("coverage") or {}
+        if coverage.get("mode") == "headers_only":
+            uncovered = coverage.get("uncoveredRules") or []
+            coverage_text = (
+                "solo cabeceras. Estas reglas no tuvieron cuerpo, enlaces ni "
+                f"adjuntos que inspeccionar: {_esc(', '.join(uncovered)) or 'ninguna'}."
+            )
+        else:
+            coverage_text = "mensaje completo."
+
+        text = (
+            f"<b>Confianza del análisis: {label}.</b> Es una escala ordinal, no "
+            "una probabilidad: el score mide riesgo y no está calibrado "
+            f"estadísticamente.<br/><b>Cobertura:</b> {coverage_text}"
+        )
+        for reason in self.report.get("uncertaintyReasons") or []:
+            text += f"<br/>• {_esc(reason)}"
+
+        card = Table([[Paragraph(text, theme.body)]], colWidths=[6.4 * inch])
+        card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(theme.palette["white"])),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor(theme.palette["light"])),
+            ("LEFTPADDING", (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ]))
+        elements.append(card)
         elements.append(Spacer(1, 0.22 * inch))
 
     def append_quality_warning(self, elements: list, theme: IrisReportTheme) -> None:
@@ -586,6 +656,15 @@ class IrisPDFCreator:
             elements.append(Spacer(1, 0.08 * inch))
             for flagged_rule in flagged:
                 text = f"<b>{_esc(flagged_rule.get('ruleName'))}:</b> {_esc(flagged_rule.get('recommendation'))}"
+                # El extracto ya viene desactivado (hxxp, [.], [@]): el PDF sale
+                # del panel autenticado y no debe llevar enlaces vivos.
+                evidence = flagged_rule.get("evidence") or []
+                for item in evidence[:self._EVIDENCE_PER_RULE]:
+                    text += f"<br/>Evidencia: <font face='Courier'>{_esc(item.get('excerpt'))}</font>"
+                if len(evidence) > self._EVIDENCE_PER_RULE:
+                    text += f"<br/>(y {len(evidence) - self._EVIDENCE_PER_RULE} fragmentos más)"
+                if not evidence and flagged_rule.get("evidenceUnavailableReason"):
+                    text += f"<br/><i>Sin evidencia anclada: {_esc(flagged_rule['evidenceUnavailableReason'])}</i>"
                 elements.append(Paragraph(text, theme.body))
             elements.append(Spacer(1, 0.15 * inch))
 
@@ -781,6 +860,7 @@ class IrisPDFCreator:
 
         self.append_cover_page(elements, theme)
         self.append_verdict_hero(elements, theme)
+        self.append_confidence(elements, theme)
         self.append_quality_warning(elements, theme)
         self.append_email_preview(elements, theme)
         self.append_gate_reasons(elements, theme)

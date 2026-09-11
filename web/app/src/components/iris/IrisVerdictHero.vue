@@ -7,6 +7,9 @@
     <div class="rv-hero-verdict">
       <span class="verdict-badge" :class="`verdict--${verdictClass}`">{{ verdict }}</span>
       <span class="verdict-status">{{ statusLabel }}</span>
+      <span v-if="confidenceLabel" class="verdict-confidence" :class="`confidence--${confidence}`">
+        Confianza {{ confidenceLabel }} · {{ coverageLabel }}
+      </span>
     </div>
   </div>
 </template>
@@ -22,7 +25,18 @@ import { computed } from 'vue'
 const props = defineProps({
   score: { type: [Number, null], default: null },
   verdict: { type: [String, null], default: null },
+  // Confianza ordinal del análisis ('high' | 'medium' | 'low'). No es una
+  // probabilidad: el score no está calibrado, así que nunca se muestra como %.
+  confidence: { type: [String, null], default: null },
+  // 'full_message' | 'headers_only'
+  coverageMode: { type: [String, null], default: null },
 })
+
+const CONFIDENCE_LABELS = { high: 'alta', medium: 'media', low: 'baja' }
+const confidenceLabel = computed(() => CONFIDENCE_LABELS[props.confidence] ?? '')
+const coverageLabel = computed(() =>
+  props.coverageMode === 'headers_only' ? 'solo cabeceras' : 'mensaje completo'
+)
 
 const verdictClass = computed(() => {
   const v = props.verdict?.toLowerCase() ?? ''
@@ -110,4 +124,11 @@ const statusLabel = computed(() => {
   font-size: var(--fs-lg);
   color: var(--text-dim);
 }
+
+.verdict-confidence {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.confidence--low { color: var(--warn); }
 </style>

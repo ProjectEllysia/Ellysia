@@ -12,6 +12,18 @@ Managers del módulo Iris (análisis de correo).
   cuando la ingesta automática de buzón clasifica un correo como Phishing.
 - ``IrisNotificationPreferenceManager`` (``notifications.py``): lectura y
   escritura de las preferencias de notificación de un usuario.
+- ``IrisFeedbackManager`` (``feedback.py``): correcciones del analista y
+  métricas del detector calculadas a partir de ellas.
+- ``IrisReplayManager`` (``replay.py``): simulador de reglas para
+  administradores — compara políticas de puntuación sobre el corpus.
+- ``IrisTrustPolicyManager`` (``trust.py``): excepciones de confianza por
+  usuario (remitentes y dominios), con motivo, caducidad y revocación.
+- ``IrisTriageManager`` (``triage.py``): vistas guardadas y etiquetas del
+  historial de triaje.
+- ``IrisCaseManager`` (``cases.py``): casos de analista con estado,
+  prioridad, asignación, notas y timeline sobre uno o varios análisis.
+- ``IrisBatchManager`` (``batch.py``): análisis por lotes de varios .eml o
+  un ZIP, con límites, duplicados y back pressure.
 
 Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el
@@ -30,9 +42,21 @@ from .analysis import IrisManager
 from .reports import IrisReportManager
 from .mailbox import IrisMailboxManager
 from .notifications import IrisPhishingNotifyManager, IrisNotificationPreferenceManager
+from .feedback import IrisFeedbackManager
+from .replay import IrisReplayManager
+from .trust import IrisTrustPolicyManager
+from .triage import IrisTriageManager
+from .cases import IrisCaseManager
+from .batch import IrisBatchManager
 
 __all__ = [
     "IrisManager",
+    "IrisTrustPolicyManager",
+    "IrisTriageManager",
+    "IrisCaseManager",
+    "IrisBatchManager",
+    "IrisFeedbackManager",
+    "IrisReplayManager",
     "IrisReportManager",
     "IrisMailboxManager",
     "IrisPhishingNotifyManager",

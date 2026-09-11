@@ -141,7 +141,7 @@ www.ellysia.es, http://localhost, http://127.0.0.1 {
 	# las continuaciones con `\` a un único espacio inicial, así que la
 	# alineación bonita no sobrevive al formateador. Una línea por matcher es
 	# lo que el formateador deja en paz.
-	@spa_bajo_prefijo_api path /themis/ /themis/escaneos /aegis/ /aegis/generador /iris/ /iris/analisis /iris/conexiones /acheron/ /acheron/boveda /hygeia/ /hygeia/activos /hygeia/etiquetas
+	@spa_bajo_prefijo_api path /themis/ /themis/escaneos /aegis/ /aegis/generador /iris/ /iris/analisis /iris/conexiones /iris/confianza /iris/casos /acheron/ /acheron/boveda /hygeia/ /hygeia/activos /hygeia/etiquetas
 	handle @spa_bajo_prefijo_api {
 		import spa
 	}
