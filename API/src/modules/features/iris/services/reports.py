@@ -475,6 +475,54 @@ class IrisPDFCreator:
 
         elements.append(Spacer(1, 0.22 * inch))
 
+    _CONFIDENCE_LABELS = {"high": "Alta", "medium": "Media", "low": "Baja"}
+
+    def append_confidence(self, elements: list, theme: IrisReportTheme) -> None:
+        """Confianza y cobertura del veredicto, justo debajo de él.
+
+        Usa la misma semántica que la API y la UI: una confianza ordinal
+        (alta/media/baja), nunca un porcentaje, con sus motivos, y si se
+        inspeccionó el mensaje completo o solo sus cabeceras. No aparece en
+        informes de análisis anteriores a que se calculara.
+
+        Args:
+            elements: Lista de flowables del documento, a la que se añade.
+            theme: Tema del informe (estilos y paleta).
+        """
+        label = self._CONFIDENCE_LABELS.get(self.report.get("confidence") or "")
+        if label is None:
+            return
+
+        coverage = self.report.get("coverage") or {}
+        if coverage.get("mode") == "headers_only":
+            uncovered = coverage.get("uncoveredRules") or []
+            coverage_text = (
+                "solo cabeceras. Estas reglas no tuvieron cuerpo, enlaces ni "
+                f"adjuntos que inspeccionar: {_esc(', '.join(uncovered)) or 'ninguna'}."
+            )
+        else:
+            coverage_text = "mensaje completo."
+
+        text = (
+            f"<b>Confianza del análisis: {label}.</b> Es una escala ordinal, no "
+            "una probabilidad: el score mide riesgo y no está calibrado "
+            f"estadísticamente.<br/><b>Cobertura:</b> {coverage_text}"
+        )
+        for reason in self.report.get("uncertaintyReasons") or []:
+            text += f"<br/>• {_esc(reason)}"
+
+        card = Table([[Paragraph(text, theme.body)]], colWidths=[6.4 * inch])
+        card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(theme.palette["white"])),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor(theme.palette["light"])),
+            ("LEFTPADDING", (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ]))
+        elements.append(card)
+        elements.append(Spacer(1, 0.22 * inch))
+
     def append_quality_warning(self, elements: list, theme: IrisReportTheme) -> None:
         """Aviso de análisis degradado, justo debajo del veredicto.
 
@@ -800,6 +848,7 @@ class IrisPDFCreator:
 
         self.append_cover_page(elements, theme)
         self.append_verdict_hero(elements, theme)
+        self.append_confidence(elements, theme)
         self.append_quality_warning(elements, theme)
         self.append_email_preview(elements, theme)
         self.append_gate_reasons(elements, theme)

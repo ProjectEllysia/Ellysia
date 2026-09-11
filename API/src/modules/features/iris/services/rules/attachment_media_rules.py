@@ -36,7 +36,7 @@ _IMG_SRC_RE = re.compile(r'<img\b[^>]*src\s*=\s*["\']([^"\']+)["\']',
 
 
 @iris_rules.register(
-    name="External Image Tracking",
+    name="External Image Tracking", is_body_dependent=True,
     category="content_analysis", family="attachment",
     description=(
         "Detecta imágenes (u otros recursos) embebidos desde un dominio "
@@ -116,7 +116,7 @@ _SRC_RE = re.compile(r'src\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
 
 @iris_rules.register(
-    name="Image-Only Email",
+    name="Image-Only Email", is_body_dependent=True,
     category="content_analysis", family="attachment",
     description=(
         "Detecta correos cuyo contenido visible es esencialmente una sola "
@@ -333,7 +333,7 @@ def _check_headers_fallback(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Suspicious Attachments", category="content_analysis", family="attachment",
+    name="Suspicious Attachments", is_body_dependent=True, category="content_analysis", family="attachment",
     description=(
         "Inspecciona los adjuntos MIME reales (extensiones peligrosas, doble "
         "extensión, macros, HTML smuggling, ZIP con ejecutables); recurre a la "

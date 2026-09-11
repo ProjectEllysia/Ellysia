@@ -157,6 +157,17 @@ class FailedRuleSchema(Schema):
     category = fields.String(load_default=None, allow_none=True)
 
 
+class CoverageSchema(Schema):
+    """Qué partes del mensaje se pudieron inspeccionar.
+
+    ``mode`` es ``full_message`` (había cuerpo o adjuntos) o ``headers_only``;
+    en este último, ``uncoveredRules`` lista las reglas de cuerpo, enlaces y
+    adjuntos que no tuvieron nada que mirar.
+    """
+    mode = fields.String()
+    uncoveredRules = fields.List(fields.String(), load_default=None)
+
+
 class PreviewHeadersSchema(Schema):
     """Cabeceras de la vista previa del mensaje que produjo el veredicto.
 
@@ -191,6 +202,10 @@ class AnalysisDetailResponseSchema(Schema):
     ``wrapper``); ``rules``, ``topSignals``, ``previewHeaders`` y los IOCs
     describen siempre ese mensaje. ``secondaryContext`` trae el otro, solo
     en reenvíos.
+
+    ``confidence`` es ordinal (``high``/``medium``/``low``), **no** una
+    probabilidad; ``uncertaintyReasons`` explica por qué no es ``high`` y
+    ``coverage`` dice si se inspeccionó el mensaje completo o solo cabeceras.
     """
     analysisId = fields.Integer()
     title = fields.String(load_default=None)
@@ -202,6 +217,9 @@ class AnalysisDetailResponseSchema(Schema):
     analysisQuality = fields.String(load_default=None, allow_none=True)
     failedRules = fields.List(fields.Nested(FailedRuleSchema), load_default=None)
     detectorVersion = fields.String(load_default=None, allow_none=True)
+    confidence = fields.String(load_default=None, allow_none=True)
+    coverage = fields.Nested(CoverageSchema, load_default=None, allow_none=True)
+    uncertaintyReasons = fields.List(fields.String(), load_default=None)
     topSignals = fields.List(fields.Nested(TopSignalSchema), load_default=None)
     aiSummary = fields.Nested(AiSummarySchema, load_default=None, allow_none=True)
     aiSummaryStatus = fields.String(load_default=None, allow_none=True)
@@ -230,6 +248,7 @@ class AnalysisListItemSchema(Schema):
     status = fields.String()
     failureCode = fields.String(load_default=None, allow_none=True)
     analysisQuality = fields.String(load_default=None, allow_none=True)
+    confidence = fields.String(load_default=None, allow_none=True)
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
     startedAt = fields.String(load_default=None)

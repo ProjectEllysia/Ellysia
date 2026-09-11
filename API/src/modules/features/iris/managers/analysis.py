@@ -61,7 +61,14 @@ from ..services.contexts import (
     context_of_type,
     preview_headers,
 )
-from ..services.quality import assess_quality, cap_verdict, detector_version
+from ..services.quality import (
+    ConfidenceAssessment,
+    assess_confidence,
+    assess_coverage,
+    assess_quality,
+    cap_verdict,
+    detector_version,
+)
 from ..services.ai_writer import IrisAIWriter
 from .notifications import IrisPhishingNotifyManager
 
@@ -420,6 +427,9 @@ class IrisManager(TaskTrackingMixin):
             "startedAt": isoformat_utc(analysis.started_at),
             "finishedAt": isoformat_utc(analysis.finished_at),
             "analysisQuality": analysis.analysis_quality,
+            "confidence": analysis.confidence,
+            "coverage": analysis.coverage,
+            "uncertaintyReasons": analysis.uncertainty_reasons or [],
             "failedRules": analysis.failed_rules or [],
             "detectorVersion": analysis.detector_version,
             "failureCode": analysis.failure_code,
@@ -975,6 +985,7 @@ class IrisManager(TaskTrackingMixin):
                 "status": analysis_record.status,
                 "failureCode": analysis_record.failure_code,
                 "analysisQuality": analysis_record.analysis_quality,
+                "confidence": analysis_record.confidence,
                 "totalScore": analysis_record.total_score,
                 "verdict": analysis_record.verdict,
                 "startedAt": isoformat_utc(analysis_record.started_at), # type: ignore
@@ -1091,11 +1102,16 @@ class IrisManager(TaskTrackingMixin):
                     evaluations, _VERDICT_SEVERITY,
                 )
                 verdict, total_score = winner.verdict, winner.total_score
+                config = CR.iris_config()
+                confidence = assess_confidence(winner, secondary,
+                                               config.legitimate_threshold,
+                                               config.suspicious_threshold)
 
                 self._persist_analysis_results(analysis_id, rules_defs, winner,
                                                detector_version(rules_defs),
                                                secondary=secondary,
-                                               winning_reason=winning_reason)
+                                               winning_reason=winning_reason,
+                                               confidence=confidence)
             except Exception as e:
                 logger.error(f"Analysis {analysis_id} failed: {e}", exc_info=True)
                 self._fail_analysis(analysis_id, classify_failure(e))
@@ -1193,6 +1209,7 @@ class IrisManager(TaskTrackingMixin):
             evaluations.append(ContextEvaluation(
                 context_type=context_type, verdict=verdict, total_score=total_score,
                 gate_reasons=gate_reasons + quality_reasons, results=results, quality=quality,
+                coverage=assess_coverage(evaluated_context, rules_defs),
             ))
 
         return evaluations
@@ -1201,7 +1218,8 @@ class IrisManager(TaskTrackingMixin):
     def _persist_analysis_results(analysis_id: int, rules_defs: List[dict],
                                    winner: ContextEvaluation, detector: str,
                                    secondary: Optional[ContextEvaluation] = None,
-                                   winning_reason: Optional[str] = None) -> None:
+                                   winning_reason: Optional[str] = None,
+                                   confidence: Optional[ConfidenceAssessment] = None) -> None:
         """Persiste las filas de regla y el estado final del análisis en una
         única transacción.
 
@@ -1230,6 +1248,9 @@ class IrisManager(TaskTrackingMixin):
             secondary: Evaluación del otro contexto de un reenvío. Por defecto
                 ``None`` (el mensaje no era un reenvío).
             winning_reason: Por qué ganó ``winner``; ``None`` sin reenvío.
+            confidence: Confianza ordinal y motivos de incertidumbre del
+                veredicto. Por defecto ``None``: las columnas de confianza
+                quedan a NULL (se lee como "sin evaluar").
         """
         with UnitOfWork() as uow:
             rule_repo = IrisRuleResultRepository(uow)
@@ -1266,6 +1287,9 @@ class IrisManager(TaskTrackingMixin):
                 failed_rules=winner.quality.failed_rules or None, detector_version=detector,
                 winning_context=winner.context_type, winning_reason=winning_reason,
                 secondary_context=secondary_summary,
+                confidence=confidence.level if confidence else None,
+                coverage=winner.coverage or None,
+                uncertainty_reasons=confidence.reasons if confidence else None,
                 finished_at=utcnow_naive(),
             )
             if not transitioned:

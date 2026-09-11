@@ -117,3 +117,37 @@ def test_user_prompt_includes_verdict_score_and_only_failed_rules(monkeypatch):
     assert "Lookalike Sender Domain" in prompt
     # SPF passed (score 0) -- must not appear in the failed-rules list.
     assert '"name": "SPF"' not in prompt
+
+
+def test_user_prompt_carries_the_analysis_confidence_and_coverage(monkeypatch):
+    """El resumen recibe la misma confianza, cobertura y motivos que ve el
+    analista, y la instrucción de no convertirlos en porcentaje."""
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts=_FAKE_PROMPTS))
+    writer = IrisAIWriter(generator=_FakeGenerator("{}"))
+    report = _sample_report() | {
+        "confidence": "low",
+        "coverage": {"mode": "headers_only", "uncoveredRules": ["Body Links"]},
+        "uncertaintyReasons": ["Solo se analizaron las cabeceras."],
+    }
+    prompt = writer._build_user_prompt(report)
+
+    assert "CONFIANZA DEL ANÁLISIS: BAJA" in prompt
+    assert "solo cabeceras" in prompt
+    assert "Solo se analizaron las cabeceras." in prompt
+    assert "porcentaje" in prompt
+
+
+def test_user_prompt_has_no_confidence_note_for_old_reports(monkeypatch):
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts=_FAKE_PROMPTS))
+    writer = IrisAIWriter(generator=_FakeGenerator("{}"))
+    assert "CONFIANZA DEL ANÁLISIS" not in writer._build_user_prompt(_sample_report())
+
+
+def test_generate_reports_the_analysis_confidence_not_the_model_one(monkeypatch):
+    """El modelo no puede saber más que el análisis del que parte: aunque
+    responda ALTA, el resumen lleva la confianza del análisis."""
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts=_FAKE_PROMPTS))
+    raw = '{"executive_summary": "x", "attacker_intent": "y", "confidence": "ALTA"}'
+    writer = IrisAIWriter(generator=_FakeGenerator(raw))
+    result = writer.generate(_sample_report() | {"confidence": "medium"})
+    assert result["confidence"] == "MEDIA"
