@@ -19,6 +19,9 @@ encoding patterns typical of phishing.
 - **Encoded-Word Abuse**: RFC 2047 encoded-word chaining, exotic
   charsets, or content that only reveals a URL once decoded — all ways
   to evade scanners that only match cleartext substrings.
+- **Image Text Phishing**: the text inside the email's images, read with
+  local OCR (``services/ocr.py``), run through the same credential,
+  urgency, brand and URL checks as the body.
 """
 
 from __future__ import annotations
@@ -28,9 +31,11 @@ import re
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..evidence import attachment_evidence, header_evidence, unique_evidence
-from ..wordlists import alarming_emojis, exotic_charsets, phrase_matches, suspicious_tlds
+from ..ocr import OCR_NO_ENGINE, extract_text
+from ..redaction import redact_pii
+from ..wordlists import alarming_emojis, brand_trusted_domains, exotic_charsets, phrase_matches, suspicious_tlds
 from ..text import (
-    extract_display_name, extract_domain, is_free_provider,
+    analyze_url, extract_display_name, extract_domain, is_free_provider,
     registrable_domain, strip_html,
 )
 from ..parsers import decode_mime_words
@@ -709,5 +714,152 @@ def check_toad_callback_pattern(context) -> RuleResult:
             "Delivery): en vez de un enlace de phishing, el ataque continua por "
             "telefono. No llames al numero del correo; busca el telefono oficial "
             "por otro medio (la web oficial, el reverso de tu tarjeta, etc.)."
+        ),
+    )
+
+
+_OCR_EXCERPT_CHARS = 400
+_OCR_MAX_URLS = 5
+_IMAGE_TEXT_LABELS = {
+    "credential_request": "petición de credenciales",
+    "urgency": "urgencia",
+    "brand_impersonation": "una marca ajena al remitente",
+    "suspicious_url": "una URL sospechosa",
+}
+
+
+def _brand_mentions(text_lower: str, sender_domain: str) -> list[str]:
+    """Marcas que un texto nombra sin que el remitente sea uno de sus dominios legítimos.
+
+    Args:
+        text_lower: Texto en minúsculas.
+        sender_domain: Dominio registrable del remitente (``""`` si no se sabe).
+
+    Returns:
+        list[str]: La primera palabra clave de cada marca nombrada, en el
+            orden de ``brand_trusted_domains``.
+    """
+    brands = []
+    for keywords, domains in brand_trusted_domains():
+        if sender_domain and any(sender_domain == domain or sender_domain.endswith("." + domain)
+                                 for domain in domains):
+            continue
+        if any(re.search(rf"\b{re.escape(keyword.lower())}\b", text_lower) for keyword in keywords):
+            brands.append(keywords[0])
+    return brands
+
+
+def _image_text_findings(text: str, sender_domain: str) -> tuple[list[dict], float]:
+    """Aplica al texto de una imagen los chequeos de contenido de Iris.
+
+    Petición de credenciales y urgencia, con los mismos datasets que «Body
+    Content» y «Alarming Keywords»; marcas nombradas por un remitente ajeno,
+    que solo cuentan junto a una petición de credenciales (nombrar una marca en
+    una imagen es corriente: un banner, un medio de pago); y las URLs escritas
+    en la imagen, con los chequeos de «Body Links».
+
+    Args:
+        text: Texto reconocido por el OCR.
+        sender_domain: Dominio registrable del remitente (``""`` si no se sabe).
+
+    Returns:
+        tuple[list[dict], float]: Los hallazgos, cada uno con su ``type``
+            (``credential_request``, ``urgency``, ``brand_impersonation`` o
+            ``suspicious_url``), y la suma de sus pesos (cero o negativa).
+    """
+    text_lower = text.lower()
+    findings: list[dict] = []
+    score = 0.0
+    credential = phrase_matches("credential_phrases", text_lower)
+    if credential:
+        findings.append({"type": "credential_request", "phrases": credential})
+        score += CR.get_iris_scoring_weight("image_text.credential_request", -8)
+    urgency = phrase_matches("high_signal_keywords", text_lower)
+    if urgency:
+        findings.append({"type": "urgency", "phrases": urgency})
+        score += CR.get_iris_scoring_weight("image_text.urgency", -4)
+    brands = _brand_mentions(text_lower, sender_domain) if credential else []
+    if brands:
+        findings.append({"type": "brand_impersonation", "brands": brands})
+        score += CR.get_iris_scoring_weight("image_text.brand_impersonation", -6)
+    for url in list(dict.fromkeys(_contains_url(text)))[:_OCR_MAX_URLS]:
+        url_findings, url_score = analyze_url(url, sender_domain)
+        if url_findings:
+            findings.append({"type": "suspicious_url", "url": url,
+                             "checks": sorted({url_finding["type"] for url_finding in url_findings})})
+            score += url_score
+    return findings, score
+
+
+@iris_rules.register(
+    name="Image Text Phishing", rule_id="iris.content.image_text_phishing", severity="medium",
+    is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="content",
+    description=(
+        "Lee con OCR local (Tesseract) el texto de las imágenes del correo y le "
+        "aplica los chequeos de contenido: petición de credenciales, urgencia, "
+        "marcas y URLs. Detecta el phishing que esconde su texto en una imagen "
+        "para esquivar los filtros de texto."
+    ),
+    needs_context=True,
+)
+def check_image_text_phishing(context) -> RuleResult:
+    """Busca phishing en el texto de las imágenes del correo.
+
+    Args:
+        context: ``MessageContext`` del mensaje.
+
+    Returns:
+        RuleResult: ``neutral`` si el OCR está desactivado, no hay imágenes
+            que leer o Tesseract no está instalado (``details.ocr`` dice
+            cuál); ``pass`` si el texto leído no tiene nada; ``fail`` con los
+            hallazgos de cada imagen, acotado por ``image_text.floor``. Salvo
+            en ``neutral``, ``ocr_texts`` guarda como evidencia un extracto
+            **redactado** (sin emails, teléfonos ni tarjetas) del texto de cada
+            imagen.
+    """
+    config = CR.iris_ocr_config()
+    if not config.enabled:
+        return RuleResult(score=0, verdict="neutral", details={"ocr": "disabled"})
+    images = [(index, att) for index, att in enumerate(context.attachments)
+              if (att.content_type or "").startswith("image/") and len(att.content) >= config.min_image_bytes]
+    if not images:
+        return RuleResult(score=0, verdict="neutral", details={"ocr": "no_images"})
+
+    sender_domain = registrable_domain(extract_domain(context.headers.get("from", "")))
+    findings: list[dict] = []
+    evidence: list[dict] = []
+    texts: list[dict] = []
+    statuses: dict[str, int] = {}
+    score = 0.0
+    for index, image in images[:config.max_images]:
+        result = extract_text(image.content, languages=config.languages, max_pixels=config.max_pixels,
+                              timeout_seconds=config.timeout_seconds)
+        if result.status == OCR_NO_ENGINE:
+            return RuleResult(score=0, verdict="neutral", details={"ocr": OCR_NO_ENGINE})
+        statuses[result.status] = statuses.get(result.status, 0) + 1
+        if not result.text:
+            continue
+        filename = image.filename or "(imagen)"
+        texts.append({"filename": filename, "text": redact_pii(result.text)[:_OCR_EXCERPT_CHARS]})
+        image_findings, image_score = _image_text_findings(result.text, sender_domain)
+        if image_findings:
+            findings.extend({**finding, "filename": filename} for finding in image_findings)
+            score += image_score
+            evidence.append(attachment_evidence(index, image))
+
+    details = {"image_count": len(images), "ocr_status": statuses, "ocr_texts": texts}
+    if not findings:
+        return RuleResult(score=0, verdict="pass", details=details)
+    score = max(score, CR.get_iris_scoring_weight("image_text.floor", -20))
+    kinds = sorted({finding["type"] for finding in findings})
+    return RuleResult(
+        score=score, verdict="fail",
+        details={**details, "findings": findings},
+        evidence=evidence,
+        recommendation=(
+            "Una imagen del correo contiene texto típico de phishing ("
+            + ", ".join(_IMAGE_TEXT_LABELS[kind] for kind in kinds) + "). Poner el mensaje "
+            "en una imagen es una forma de esquivar los filtros de texto: no sigas sus "
+            "instrucciones ni escribas a mano la dirección que muestra."
         ),
     )

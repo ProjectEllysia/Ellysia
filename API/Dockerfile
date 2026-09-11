@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjson-perl \
     libnet-ssleay-perl \
     libxml-writer-perl \
+    tesseract-ocr \
+    tesseract-ocr-spa \
     && git clone --depth 1 https://github.com/sullo/nikto.git /nikto \
     && chmod +x /nikto/program/nikto.pl \
     && ln -s /nikto/program/nikto.pl /usr/local/bin/nikto \
