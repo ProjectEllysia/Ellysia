@@ -153,7 +153,9 @@ def test_a_case_is_only_assigned_to_whoever_can_see_its_analyses(client, analyst
     daría acceso a ese correo, y una organización comparte plan, no datos."""
     user, headers = analyst
     other = make_user(role="role_user", attributes=_IRIS_ATTRIBUTES)
-    case_id = _open(client, headers).get_json()["caseId"]
+    case = _open(client, headers).get_json()
+    case_id = case["caseId"]
+    assert case["ownerId"] == user.id
 
     assert client.patch(f"/iris/cases/{case_id}", headers=headers, json={"assigneeId": other.id}).status_code == 400
     assigned = client.patch(f"/iris/cases/{case_id}", headers=headers, json={"assigneeId": user.id}).get_json()

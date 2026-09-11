@@ -1010,7 +1010,11 @@ class IrisCaseSummarySchema(Schema):
 
 
 class IrisCaseDetailSchema(IrisCaseSummarySchema):
-    """Un caso entero: resumen, razón de cierre, análisis y timeline."""
+    """Un caso entero: resumen, razón de cierre, análisis y timeline.
+
+    ``ownerId`` es el dueño, el único al que se puede asignar el caso.
+    """
+    ownerId = fields.Integer()
     assigneeId = fields.Integer(allow_none=True)
     resolutionReason = fields.String(allow_none=True)
     analyses = fields.List(fields.Nested(IrisCaseAnalysisItemSchema))

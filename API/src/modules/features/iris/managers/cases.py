@@ -132,13 +132,15 @@ def _detail(case: IrisCase) -> Dict[str, Any]:
         case: Caso con sus vínculos y eventos cargados.
 
     Returns:
-        dict: Lo de ``_summary`` más ``assigneeId``, ``resolutionReason``,
-            ``analyses`` (id, título, estado, veredicto, score, confianza y
-            cuándo se vinculó) y ``timeline`` (del evento más antiguo al más
-            reciente, con su autor).
+        dict: Lo de ``_summary`` más ``ownerId`` (el único usuario al que se
+            puede asignar), ``assigneeId``, ``resolutionReason``, ``analyses``
+            (id, título, estado, veredicto, score, confianza y cuándo se
+            vinculó) y ``timeline`` (del evento más antiguo al más reciente,
+            con su autor).
     """
     return {
         **_summary(case),
+        "ownerId": case.user_id,
         "assigneeId": case.assignee_id,
         "resolutionReason": case.resolution_reason,
         "analyses": [{
