@@ -12,6 +12,8 @@ Managers del módulo Iris (análisis de correo).
   cuando la ingesta automática de buzón clasifica un correo como Phishing.
 - ``IrisNotificationPreferenceManager`` (``notifications.py``): lectura y
   escritura de las preferencias de notificación de un usuario.
+- ``IrisFeedbackManager`` (``feedback.py``): correcciones del analista y
+  métricas del detector calculadas a partir de ellas.
 
 Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el
@@ -30,9 +32,11 @@ from .analysis import IrisManager
 from .reports import IrisReportManager
 from .mailbox import IrisMailboxManager
 from .notifications import IrisPhishingNotifyManager, IrisNotificationPreferenceManager
+from .feedback import IrisFeedbackManager
 
 __all__ = [
     "IrisManager",
+    "IrisFeedbackManager",
     "IrisReportManager",
     "IrisMailboxManager",
     "IrisPhishingNotifyManager",

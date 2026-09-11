@@ -1,0 +1,20 @@
+From: PayPal Soporte <alerta@paypa1-secure.example>
+Reply-To: cobros@gmail.com
+To: victima@corp.example
+Subject: Verifique su cuenta urgentemente
+Date: Mon, 07 Sep 2026 09:30:00 +0000
+Message-ID: <x1@paypa1-secure.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="B"
+
+--B
+Content-Type: text/html; charset=utf-8
+
+<p>Estimado cliente, verifique su cuenta.</p><a href="http://192.168.10.20/login">https://www.paypal.com</a>
+--B
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="factura.pdf.exe"
+Content-Transfer-Encoding: base64
+
+TVqQAA==
+--B--

@@ -10,13 +10,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import and_, asc, delete, desc, nullslast, select, update
+from sqlalchemy import and_, asc, delete, desc, func, nullslast, select, update
 from sqlalchemy.orm import joinedload
 
 from src.modules.infrastructure import BaseRepository, DocumentRepository
 from src.modules.shared import utcnow_naive
 
 from .model import (
+    IrisAnalystFeedback,
     IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisNotificationPreference,
     IrisRawMessage, IrisRuleResult, IrisDocument,
 )
@@ -198,6 +199,24 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         """Cuántos análisis tiene este usuario en total -- para el informe
         de retención, que necesita el denominador."""
         return self._session.query(IrisAnalysis.id).filter(IrisAnalysis.user_id == user_id).count()
+
+    def count_finished_by_user(self, user_id: int) -> int:
+        """Cuántos análisis terminados tiene un usuario.
+
+        Es el denominador de la cobertura de feedback: solo un análisis
+        terminado tiene un veredicto que el analista pueda corregir.
+
+        Args:
+            user_id: Dueño de los análisis.
+
+        Returns:
+            int: Número de análisis en estado ``finished``.
+        """
+        return (
+            self._session.query(IrisAnalysis.id)
+            .filter(IrisAnalysis.user_id == user_id, IrisAnalysis.status == "finished")
+            .count()
+        )
 
     def count_with_raw_retained_by_user(self, user_id: int) -> int:
         """De los análisis de este usuario, cuántos conservan todavía su
@@ -521,6 +540,75 @@ class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
         self._session.query(IrisRuleResult).filter(
             IrisRuleResult.analysis_id == analysis_id
         ).delete()
+
+
+class IrisAnalystFeedbackRepository(BaseRepository[IrisAnalystFeedback]):
+    """Acceso a las correcciones del analista (``IrisAnalystFeedback``).
+
+    Cada corrección es una fila nueva; la vigente de un análisis es la de
+    ``id`` más alto, que crece junto con ``created_at``.
+    """
+
+    _MODEL = IrisAnalystFeedback
+
+    def get_by_analysis(self, analysis_id: int) -> List[IrisAnalystFeedback]:
+        """Historial de correcciones de un análisis, de la más reciente a la más antigua.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis``.
+
+        Returns:
+            List[IrisAnalystFeedback]: Las correcciones; lista vacía si no hay.
+        """
+        return (
+            self._session.query(IrisAnalystFeedback)
+            .filter(IrisAnalystFeedback.analysis_id == analysis_id)
+            .order_by(IrisAnalystFeedback.id.desc())
+            .all()
+        )
+
+    def latest_for_analysis(self, analysis_id: int) -> Optional[IrisAnalystFeedback]:
+        """Corrección vigente de un análisis.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis``.
+
+        Returns:
+            Optional[IrisAnalystFeedback]: La más reciente, o ``None`` si
+                nadie lo ha revisado.
+        """
+        return (
+            self._session.query(IrisAnalystFeedback)
+            .filter(IrisAnalystFeedback.analysis_id == analysis_id)
+            .order_by(IrisAnalystFeedback.id.desc())
+            .first()
+        )
+
+    def latest_per_analysis_for_user(self, user_id: int) -> List[IrisAnalystFeedback]:
+        """La corrección vigente de cada análisis revisado de un usuario.
+
+        Es la entrada de las métricas: una etiqueta por análisis (la última),
+        no una por corrección, para que cambiar de opinión no cuente dos veces.
+
+        Args:
+            user_id: Dueño de los análisis.
+
+        Returns:
+            List[IrisAnalystFeedback]: Una fila por análisis revisado, con su
+                ``analysis`` ya cargado.
+        """
+        latest_ids = (
+            select(func.max(IrisAnalystFeedback.id))
+            .join(IrisAnalysis, IrisAnalysis.id == IrisAnalystFeedback.analysis_id)
+            .where(IrisAnalysis.user_id == user_id)
+            .group_by(IrisAnalystFeedback.analysis_id)
+        )
+        return (
+            self._session.query(IrisAnalystFeedback)
+            .options(joinedload(IrisAnalystFeedback.analysis))
+            .filter(IrisAnalystFeedback.id.in_(latest_ids))
+            .all()
+        )
 
 
 class IrisNotificationPreferenceRepository(BaseRepository[IrisNotificationPreference]):

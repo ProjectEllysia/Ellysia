@@ -10,6 +10,8 @@ from marshmallow import Schema, ValidationError, fields, validate, validates_sch
 import src.modules.system.config_reading as CR
 from src.modules.shared import UTCDateTime
 
+from .services.feedback_metrics import FEEDBACK_LABELS
+
 
 class AnalyzeRequestSchema(Schema):
     """Request body for ``POST /iris/analyze``.
@@ -177,6 +179,68 @@ class FailedRuleSchema(Schema):
     category = fields.String(load_default=None, allow_none=True)
 
 
+class IrisFeedbackRequestSchema(Schema):
+    """Corrección del analista sobre el veredicto de un análisis terminado.
+
+    ``label`` es ``malicious``, ``legitimate`` o ``unknown`` (revisado, pero
+    no se puede decidir). No modifica el veredicto: se guarda aparte y
+    alimenta las métricas.
+    """
+    label = fields.String(required=True, validate=validate.OneOf(FEEDBACK_LABELS))
+    note = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=2000))
+
+
+class IrisFeedbackItemSchema(Schema):
+    """Una corrección registrada: etiqueta, nota, autor y fecha."""
+    feedbackId = fields.Integer()
+    analysisId = fields.Integer()
+    label = fields.String()
+    note = fields.String(load_default=None, allow_none=True)
+    author = fields.String()
+    createdAt = fields.String()
+
+
+class IrisFeedbackListResponseSchema(Schema):
+    """Historial de correcciones de un análisis, de la más reciente a la más antigua."""
+    analysisId = fields.Integer()
+    feedback = fields.List(fields.Nested(IrisFeedbackItemSchema))
+
+
+class IrisFeedbackOverallMetricsSchema(Schema):
+    """Matriz de confusión y tasas globales del detector frente a las etiquetas.
+
+    Un veredicto positivo es cualquiera que avisa (``Suspicious`` o
+    ``Phishing``). Las tasas valen ``null`` cuando no hay datos.
+    """
+    truePositives = fields.Integer()
+    falsePositives = fields.Integer()
+    falseNegatives = fields.Integer()
+    trueNegatives = fields.Integer()
+    precision = fields.Float(allow_none=True)
+    recall = fields.Float(allow_none=True)
+    disagreementRate = fields.Float(allow_none=True)
+
+
+class IrisFeedbackFamilyMetricsSchema(Schema):
+    """Métricas de una familia de reglas: ¿disparar esta familia coincide con malicioso?"""
+    family = fields.String()
+    fired = fields.Integer()
+    precision = fields.Float(allow_none=True)
+    recall = fields.Float(allow_none=True)
+    disagreementRate = fields.Float(allow_none=True)
+    coverage = fields.Float(allow_none=True)
+
+
+class IrisFeedbackMetricsResponseSchema(Schema):
+    """Métricas del detector calculadas con las correcciones vigentes del usuario."""
+    analysesTotal = fields.Integer()
+    reviewed = fields.Integer()
+    unknown = fields.Integer()
+    feedbackCoverage = fields.Float(allow_none=True)
+    overall = fields.Nested(IrisFeedbackOverallMetricsSchema)
+    families = fields.List(fields.Nested(IrisFeedbackFamilyMetricsSchema))
+
+
 class CoverageSchema(Schema):
     """Qué partes del mensaje se pudieron inspeccionar.
 
@@ -259,6 +323,7 @@ class AnalysisDetailResponseSchema(Schema):
     user = fields.String()
     rules = fields.List(fields.Nested(RuleResultSchema))
     recommendations = fields.List(fields.String())
+    latestFeedback = fields.Nested(IrisFeedbackItemSchema, load_default=None, allow_none=True)
 
 
 class AnalysisListItemSchema(Schema):

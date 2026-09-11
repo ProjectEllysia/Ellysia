@@ -117,6 +117,9 @@ class IrisAnalysis(Base):
         user_id: Foreign key to the owning User.
         user: SQLAlchemy relationship to User.
         rule_results: Ordered list of IrisRuleResult (per-rule outcomes).
+        feedback: Correcciones del analista sobre este análisis
+                 (``IrisAnalystFeedback``), de la más antigua a la más reciente.
+                 Nunca modifican el veredicto de esta fila.
         connection_id: FK to the IrisMailboxConnection that ingested this
                  message automatically; NULL for manual submissions (the
                  original, still-default flow).
@@ -174,6 +177,11 @@ class IrisAnalysis(Base):
     )
     raw_message = relationship(
         "IrisRawMessage", back_populates="analysis", uselist=False,
+        cascade="all, delete-orphan",
+    )
+    feedback = relationship(
+        "IrisAnalystFeedback", back_populates="analysis",
+        order_by="IrisAnalystFeedback.created_at",
         cascade="all, delete-orphan",
     )
 
@@ -512,6 +520,49 @@ class IrisRuleResult(Base):
 
     __table_args__ = (
         Index("ix_iris_rule_result_analysis_id", "analysis_id"),
+    )
+
+
+class IrisAnalystFeedback(Base):
+    """Corrección de un analista sobre el veredicto de un análisis.
+
+    Es la etiqueta humana —"esto era malicioso", "esto era legítimo", "no se
+    puede saber"— que alimenta la calibración y las métricas del detector.
+    **Nunca cambia el veredicto ya emitido**: ``IrisAnalysis`` sigue diciendo lo
+    que Iris decidió en su momento, y esta tabla dice lo que opinó una persona
+    después. Separarlas es lo que permite medir cuánto se equivoca el motor.
+
+    Cada corrección es una fila nueva, no una edición de la anterior: el
+    historial queda entero (quién cambió de opinión y cuándo), y la etiqueta
+    vigente de un análisis es la más reciente.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis`` corregido; ``ondelete="CASCADE"``,
+                 la corrección no tiene sentido sin el análisis.
+        author_id: FK al ``User`` que la escribió.
+        label: "malicious", "legitimate" o "unknown" (el analista revisó el
+                 mensaje y no puede decidir; cuenta como revisado, pero no
+                 entra en precisión ni recall).
+        note: Nota libre del analista, opcional (hasta 2000 caracteres).
+        created_at: Cuándo se registró.
+        analysis: Relación inversa a ``IrisAnalysis``.
+        author: Relación al ``User`` autor.
+    """
+    __tablename__ = "IrisAnalystFeedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"), nullable=False)
+    author_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    label = Column(String(16), nullable=False)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    analysis = relationship("IrisAnalysis", back_populates="feedback")
+    author = relationship("User")
+
+    __table_args__ = (
+        Index("ix_iris_analyst_feedback_analysis_id", "analysis_id"),
     )
 
 

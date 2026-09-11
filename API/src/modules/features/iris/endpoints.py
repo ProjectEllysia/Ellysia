@@ -33,7 +33,8 @@ from src.modules.shared._exceptions import DocumentError, DocumentNotReadyError
 import src.modules.system.config_reading as CR
 
 from .managers import (
-    IrisManager, IrisReportManager, IrisMailboxManager, IrisNotificationPreferenceManager,
+    IrisFeedbackManager, IrisManager, IrisReportManager, IrisMailboxManager,
+    IrisNotificationPreferenceManager,
 )
 from .exceptions import (
     IrisAnalysisNotFoundError,
@@ -78,6 +79,10 @@ from .schemas import (
     IrisNotificationPreferenceResponseSchema,
     IrisNotificationPreferenceUpdateRequestSchema,
     IrisRetentionReportResponseSchema,
+    IrisFeedbackRequestSchema,
+    IrisFeedbackItemSchema,
+    IrisFeedbackListResponseSchema,
+    IrisFeedbackMetricsResponseSchema,
 )
 
 
@@ -135,6 +140,59 @@ def analyze_headers(data):
 def get_capabilities():
     """Limites y modos de analisis que aplica el servidor"""
     return IrisManager.get_capabilities()
+
+
+@iris_blp.post("/results/<int:analysis_id>/feedback")
+@iris_blp.arguments(IrisFeedbackRequestSchema)
+@iris_blp.response(201, IrisFeedbackItemSchema, description="Analyst feedback recorded")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(409, schema=ErrorSchema, description="Analysis not finished")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("120 per hour; 1000 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def submit_analysis_feedback(data, analysis_id: int):
+    """Registrar si el veredicto de un análisis era correcto (no lo modifica)"""
+    user = get_current_user()
+    feedback = IrisFeedbackManager().submit_feedback(
+        analysis_id, user.id, data["label"], data.get("note"),
+    )
+    logger.info(f"Feedback '{data['label']}' sobre el análisis {analysis_id} por {user.username}")
+    return feedback
+
+
+@iris_blp.get("/results/<int:analysis_id>/feedback")
+@iris_blp.response(200, IrisFeedbackListResponseSchema, description="Analyst feedback history")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def list_analysis_feedback(analysis_id: int):
+    """Historial de correcciones de un análisis, de la más reciente a la más antigua"""
+    user = get_current_user()
+    return {
+        "analysisId": analysis_id,
+        "feedback": IrisFeedbackManager().list_feedback(analysis_id, user.id),
+    }
+
+
+@iris_blp.get("/feedback/metrics")
+@iris_blp.response(200, IrisFeedbackMetricsResponseSchema, description="Detector metrics from analyst feedback")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(logger=logger)
+def get_feedback_metrics():
+    """Precisión, recall, cobertura y desacuerdo del detector según tus correcciones"""
+    user = get_current_user()
+    return IrisFeedbackManager().get_metrics(user.id)
 
 
 @iris_blp.get("/retention-policy")
