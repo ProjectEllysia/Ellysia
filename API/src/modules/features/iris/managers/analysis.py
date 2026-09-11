@@ -448,7 +448,8 @@ class IrisManager(TaskTrackingMixin):
 
         Returns:
             dict: ``ruleName``, ``category``, ``score``, ``verdict``,
-                ``details`` y ``recommendation``.
+                ``details``, ``recommendation``, ``evidence`` (lista, vacía si
+                no hay) y ``evidenceUnavailableReason``.
         """
         return {
             "ruleName": rule.rule_name,
@@ -457,6 +458,8 @@ class IrisManager(TaskTrackingMixin):
             "verdict": rule.verdict,
             "details": rule.details,
             "recommendation": rule.recommendation,
+            "evidence": rule.evidence or [],
+            "evidenceUnavailableReason": rule.evidence_unavailable_reason,
         }
 
     @classmethod
@@ -1268,6 +1271,8 @@ class IrisManager(TaskTrackingMixin):
                         recommendation=rule_result.recommendation,
                         position=position,
                         context_type=evaluation.context_type,
+                        evidence=rule_result.evidence or None,
+                        evidence_unavailable_reason=rule_result.evidence_unavailable_reason,
                     ))
 
             secondary_summary = None

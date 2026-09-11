@@ -483,6 +483,14 @@ class IrisRuleResult(Base):
                         muestra las del ganador y deja las otras como
                         contexto secundario. NULL en filas anteriores a que se
                         guardara, que solo existían para el contexto ganador.
+        evidence: Dónde está, dentro del mensaje, lo que la regla encontró:
+                        lista de ``{kind, locator, excerpt}`` con el contrato
+                        de ``services/evidence.py`` (cabecera y aparición,
+                        rango del cuerpo, parte MIME, adjunto o URL), con el
+                        extracto ya desactivado. NULL si la regla no penalizó
+                        o no pudo anclarse.
+        evidence_unavailable_reason: Por qué un hallazgo no se puede anclar;
+                        NULL si tiene evidencia o si la regla no penalizó.
         analysis: SQLAlchemy back-reference to the parent IrisAnalysis.
     """
     __tablename__ = "IrisRuleResult"
@@ -497,6 +505,8 @@ class IrisRuleResult(Base):
     recommendation = Column(Text, nullable=True)
     position = Column(SmallInteger, nullable=False, default=0)
     context_type = Column(String(16), nullable=True)
+    evidence = Column(JSONB, nullable=True)
+    evidence_unavailable_reason = Column(Text, nullable=True)
 
     analysis = relationship("IrisAnalysis", back_populates="rule_results")
 

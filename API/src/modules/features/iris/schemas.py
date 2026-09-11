@@ -119,14 +119,34 @@ class AnalysisStatusResponseSchema(Schema):
     failureReason = fields.String(load_default=None, allow_none=True)
 
 
+class EvidenceSchema(Schema):
+    """Dónde está, dentro del mensaje, lo que una regla encontró.
+
+    ``kind`` es ``header``, ``body``, ``mime_part``, ``attachment`` o ``url``;
+    ``locator`` dice cómo encontrarlo (p. ej. ``{"header": "from",
+    "occurrence": 0}`` o ``{"linkIndex": 2}``) y ``excerpt`` es el fragmento
+    con URLs, dominios y direcciones ya desactivados (``hxxp``, ``[.]``,
+    ``[@]``). Ver ``services/evidence.py``.
+    """
+    kind = fields.String()
+    locator = fields.Dict()
+    excerpt = fields.String()
+
+
 class RuleResultSchema(Schema):
-    """Outcome of a single rule within a finished analysis."""
+    """Outcome of a single rule within a finished analysis.
+
+    Una regla que penaliza trae ``evidence`` o, si su hallazgo no se puede
+    anclar a un fragmento del mensaje, ``evidenceUnavailableReason``.
+    """
     ruleName = fields.String()
     category = fields.String(load_default=None)
     score = fields.Float()
     verdict = fields.String()
     details = fields.Dict(load_default=None)
     recommendation = fields.String(load_default=None)
+    evidence = fields.List(fields.Nested(EvidenceSchema), load_default=None)
+    evidenceUnavailableReason = fields.String(load_default=None, allow_none=True)
 
 
 class TopSignalSchema(Schema):
