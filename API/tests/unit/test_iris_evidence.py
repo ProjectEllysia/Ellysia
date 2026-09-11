@@ -137,13 +137,13 @@ def test_invalid_self_provided_evidence_is_rejected():
 
 def test_a_rule_that_declares_nothing_cannot_be_registered():
     with pytest.raises(ValueError):
-        RuleRegistry().register(name="Sin declarar")
+        RuleRegistry().register(name="Sin declarar", rule_id="iris.test.sin_declarar", severity="low")
 
 
 def test_the_registry_anchors_through_its_wrapper_but_returns_the_original():
     registry = RuleRegistry()
 
-    @registry.register(name="Falsa", evidence_headers=("from",))
+    @registry.register(name="Falsa", evidence_headers=("from",), rule_id="iris.test.falsa", severity="low")
     def fake_rule(headers):
         return RuleResult(score=-5, verdict="fail")
 

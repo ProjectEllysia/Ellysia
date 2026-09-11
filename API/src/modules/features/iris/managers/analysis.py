@@ -115,12 +115,17 @@ def _rule_to_dict(rule: IrisRuleResult) -> Dict[str, Any]:
         rule: Fila ``IrisRuleResult`` persistida.
 
     Returns:
-        dict: ``ruleName``, ``category``, ``score``, ``verdict``,
-            ``details``, ``recommendation``, ``evidence`` (lista, vacía si
-            no hay) y ``evidenceUnavailableReason``.
+        dict: ``ruleId`` (estable; ``None`` en filas anteriores a la
+            taxonomía), ``ruleName`` (visible), ``severity``,
+            ``mitreTechniques`` (lista, vacía si no hay), ``category``,
+            ``score``, ``verdict``, ``details``, ``recommendation``,
+            ``evidence`` (lista, vacía si no hay) y ``evidenceUnavailableReason``.
     """
     return {
+        "ruleId": rule.rule_id,
         "ruleName": rule.rule_name,
+        "severity": rule.severity,
+        "mitreTechniques": rule.mitre_techniques or [],
         "category": rule.category,
         "score": rule.score,
         "verdict": rule.verdict,
@@ -540,6 +545,7 @@ class IrisManager(TaskTrackingMixin):
         negative.sort(key=lambda pair: pair[1]["score"])
         return [
             {
+                "ruleId": r.get("ruleId"),
                 "ruleName": r["ruleName"],
                 "category": r.get("category"),
                 "score": r["score"],
@@ -1422,6 +1428,9 @@ class IrisManager(TaskTrackingMixin):
                     rule_repo.save(IrisRuleResult(
                         analysis_id=analysis_id,
                         rule_name=rule_def["name"],
+                        rule_id=rule_def.get("rule_id") or None,
+                        severity=rule_def.get("severity") or None,
+                        mitre_techniques=list(rule_def.get("mitre_techniques") or ()) or None,
                         category=rule_def["category"],
                         score=rule_result.score,
                         verdict=rule_result.verdict,

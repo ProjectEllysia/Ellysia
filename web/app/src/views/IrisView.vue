@@ -29,9 +29,9 @@
 
           <p class="intake-eyebrow">{{ rejecting ? 'Formato no válido' : 'Intake de evidencia' }}</p>
           <h2 class="intake-title">
-            {{ rejecting ? 'Solo se admiten archivos .eml o un ZIP' : 'Suelta el correo (o varios) para examinarlo' }}
+            {{ rejecting ? 'Solo se admiten archivos .eml, .msg o un ZIP' : 'Suelta el correo (o varios) para examinarlo' }}
           </h2>
-          <span class="intake-chip">.eml · .zip</span>
+          <span class="intake-chip">.eml · .msg · .zip</span>
         </div>
       </div>
     </Transition>
@@ -177,7 +177,7 @@ async function onDrop(e) {
   dragDepth.value = 0
 
   const files = Array.from(e.dataTransfer?.files ?? [])
-  // Varios ficheros o un ZIP van a lote: el servidor decide qué entra.
+  // Varios ficheros, un ZIP o un .msg van a lote: el servidor decide qué entra.
   if (isBatchDrop(files)) {
     await handleBatch(files)
     return
@@ -189,7 +189,7 @@ async function onDrop(e) {
   const intake = classifyIntake(file, capabilities)
   if (!intake.accepted) {
     flashReject()
-    toast.show('Solo se aceptan archivos .eml', 'error')
+    toast.show('Solo se aceptan archivos .eml, .msg o un ZIP', 'error')
     return
   }
 
@@ -267,7 +267,7 @@ async function handleSubmit(submission) {
   }
 }
 
-/** Envía un lote de .eml o ZIP y deja el panel del lote a la vista. */
+/** Envía un lote de .eml, .msg o ZIP y deja el panel del lote a la vista. */
 async function handleBatch(files) {
   if (store.batchSubmitting) return
   await store.submitBatch(files)

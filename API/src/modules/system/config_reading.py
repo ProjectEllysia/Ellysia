@@ -1946,6 +1946,80 @@ def iris_config() -> IrisConfig:
     return load_block(IrisConfig)
 
 
+@config_block("features.iris.attachmentInspection")
+@dataclass(frozen=True)
+class IrisAttachmentInspection:
+    """Topes de la inspección estática de adjuntos de Iris (PDF, OOXML, HTML, ZIP).
+
+    Un adjunto es contenido del atacante: cada tope acota un recurso que un
+    adjunto hecho a propósito podría agotar. El tiempo de CPU no tiene tope
+    propio porque las búsquedas son lineales: queda acotado por estos bytes.
+    """
+
+    max_inspected_bytes: int = 10 * 1024 * 1024
+    """Tamaño máximo de un adjunto para abrirlo; uno mayor solo se juzga por
+    su nombre y su tipo."""
+
+    max_expanded_bytes: int = 32 * 1024 * 1024
+    """Bytes que se pueden descomprimir o extraer de un adjunto, sumando todo
+    lo que contiene (entradas de un ZIP y los ZIP dentro de ellas, flujos de un
+    PDF). Un ZIP que declara más cuenta como bomba."""
+
+    max_archive_entries: int = 1000
+    """Entradas de un ZIP (o de un documento Office) que se revisan."""
+
+    max_archive_depth: int = 2
+    """Niveles de ZIP dentro de ZIP que se abren; uno más profundo es un hallazgo."""
+
+    max_compression_ratio: int = 200
+    """Razón entre tamaño descomprimido y comprimido de una entrada de ZIP (de
+    1 MiB o más) a partir de la cual cuenta como bomba."""
+
+    max_pdf_streams: int = 1000
+    """Flujos comprimidos de un PDF que se descomprimen para buscar en ellos."""
+
+
+def iris_attachment_inspection() -> IrisAttachmentInspection:
+    return load_block(IrisAttachmentInspection)
+
+
+@config_block("features.iris.ocr")
+@dataclass(frozen=True)
+class IrisOcrConfig:
+    """OCR local de las imágenes de un correo (regla «Image Text Phishing»).
+
+    El motor es Tesseract, en la propia máquina: ninguna imagen sale a un
+    servicio de terceros. Si el binario no está instalado, la regla se queda
+    neutral.
+    """
+
+    enabled: bool = True
+    """Si se leen las imágenes."""
+
+    languages: str = "spa+eng"
+    """Idiomas de Tesseract separados por ``+``; cada uno necesita su paquete
+    de datos instalado (``tesseract-ocr-spa``…)."""
+
+    max_images: int = 5
+    """Imágenes que se leen como mucho por mensaje: el OCR es lo más caro del
+    análisis."""
+
+    min_image_bytes: int = 2048
+    """Imágenes más pequeñas no se leen: píxeles de seguimiento, iconos y
+    separadores no llevan texto."""
+
+    max_pixels: int = 16_000_000
+    """Píxeles máximos (ancho × alto) de una imagen para leerla; una captura
+    de pantalla grande ronda los 8 millones."""
+
+    timeout_seconds: int = 10
+    """Tiempo máximo del motor por imagen; si se pasa, se mata el proceso."""
+
+
+def iris_ocr_config() -> IrisOcrConfig:
+    return load_block(IrisOcrConfig)
+
+
 # --- Datasets y pesos: buscados por clave, no por campo ---------------------
 #
 # Ninguno de los dos encaja en un bloque: los datasets son dos docenas de listas

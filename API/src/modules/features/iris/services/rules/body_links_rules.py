@@ -41,7 +41,7 @@ def _max_score_floor() -> float:
 
 
 @iris_rules.register(
-    name="Body Links", is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="links",
+    name="Body Links", rule_id="iris.links.body_links", severity="high", mitre_techniques=("T1566.002",), is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="links",
     description=(
         "Analiza los enlaces reales del cuerpo: texto visible vs href, "
         "punycode/IDN, IPs literales, acortadores de URL, credenciales en la "
@@ -113,7 +113,7 @@ def _decode_qr_urls(image_bytes: bytes) -> list[str]:
 
 
 @iris_rules.register(
-    name="QR Code Links", is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="links",
+    name="QR Code Links", rule_id="iris.links.qr_code_links", severity="high", mitre_techniques=("T1566.002",), is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="links",
     description=(
         "Decodifica códigos QR en imágenes inline/adjuntas y analiza la URL "
         "resultante con la misma batería de chequeos que Body Links "
@@ -187,7 +187,7 @@ def _looks_opaque_path(path: str) -> bool:
 
 
 @iris_rules.register(
-    name="Compromised Legitimate Domain", is_self_anchoring=True, is_body_dependent=True,
+    name="Compromised Legitimate Domain", rule_id="iris.links.compromised_legitimate_domain", severity="medium", mitre_techniques=("T1566.002",), is_self_anchoring=True, is_body_dependent=True,
     category="content_analysis", family="links",
     description=(
         "Detecta enlaces a dominios legítimos que probablemente han sido "
@@ -261,7 +261,7 @@ def check_compromised_legitimate_domain(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="External Login Link", unanchorable_reason=(
+    name="External Login Link", rule_id="iris.links.external_login_link", severity="medium", mitre_techniques=("T1598.003",), unanchorable_reason=(
         "Señal informativa que no resta puntos: resume los dominios externos de todos los enlaces en conjunto."
     ), is_body_dependent=True,
     category="content_analysis",

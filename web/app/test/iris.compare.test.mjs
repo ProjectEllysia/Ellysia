@@ -49,5 +49,13 @@ check('un informe comparado consigo mismo no cambia', !same.verdictChanged && sa
 eq('sin score en un lado no hay diferencia', compareReports({ ...left, totalScore: null }, right).scoreDelta, null)
 eq('sin informes no revienta', compareReports(null, undefined).rules, [])
 
+console.log('\ncompareReports — el id estable manda sobre el nombre')
+const renamed = compareReports(
+  { verdict: 'Phishing', totalScore: 30, rules: [{ ruleId: 'iris.links.body_links', ruleName: 'Body Links', score: -20, verdict: 'fail' }] },
+  { verdict: 'Phishing', totalScore: 30, rules: [{ ruleId: 'iris.links.body_links', ruleName: 'Enlaces del cuerpo', score: -20, verdict: 'fail' }] },
+)
+eq('una regla renombrada sigue emparejada por su id', renamed.rules.length, 1)
+check('y no cuenta como cambio', renamed.changedCount === 0)
+
 console.log(`\n${passed} pasados, ${failed} fallidos`)
 process.exit(failed === 0 ? 0 : 1)

@@ -39,7 +39,7 @@ CLOCK_SKEW_TOLERANCE_SECONDS = 300
 
 
 @iris_rules.register(
-    name="Date Header Anomaly", evidence_headers=("date",), category="header_analysis", family="received",
+    name="Date Header Anomaly", rule_id="iris.received.date_header_anomaly", severity="low", evidence_headers=("date",), category="header_analysis", family="received",
     description="Detecta si la cabecera Date está ausente, en el futuro lejano o en el pasado remoto",
 )
 def check_date_anomaly(headers: dict) -> RuleResult:
@@ -108,7 +108,7 @@ def check_date_anomaly(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Received Chain", evidence_headers=("received",), category="header_analysis", family="received",
+    name="Received Chain", rule_id="iris.received.received_chain", severity="medium", evidence_headers=("received",), category="header_analysis", family="received",
     description=(
         "Analiza la cadena completa de cabeceras Received: número de saltos y "
         "consistencia temporal con Date. La IP interna del salto de origen se "
@@ -182,7 +182,7 @@ def check_received_chain(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Received Chain Temporal Inconsistency", is_self_anchoring=True,
+    name="Received Chain Temporal Inconsistency", rule_id="iris.received.temporal_inconsistency", severity="medium", is_self_anchoring=True,
     category="header_analysis", family="received",
     description=(
         "Detecta cadenas Received: con marcas de tiempo no monótonamente "
@@ -276,7 +276,7 @@ MISSING_TS_MIN_HOPS = 3
 
 
 @iris_rules.register(
-    name="Received Path Anomaly", evidence_headers=("received",),
+    name="Received Path Anomaly", rule_id="iris.received.path_anomaly", severity="medium", evidence_headers=("received",),
     category="header_analysis", family="received",
     description=(
         "Evalúa el recorrido Received: del correo — número de saltos, "
@@ -404,7 +404,7 @@ _HOSTNAME_RE = re.compile(r"[a-zA-Z0-9][\w.-]*\.[a-zA-Z]{2,}")
 
 
 @iris_rules.register(
-    name="Origin HELO Coherence", evidence_headers=("received",),
+    name="Origin HELO Coherence", rule_id="iris.received.origin_helo_coherence", severity="low", evidence_headers=("received",),
     category="header_analysis", family="received",
     description=(
         "Aproximación offline (Iris no resuelve DNS/PTR real) de coherencia "

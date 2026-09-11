@@ -20,6 +20,7 @@ import hashlib
 import json
 import re
 from functools import lru_cache
+from importlib.metadata import version
 from typing import Any
 
 import src.modules.system.config_reading as CR
@@ -30,13 +31,6 @@ import src.modules.system.config_reading as CR
 # =============================================================================
 
 _DEFAULTS: dict[str, Any] = {
-    # Public-suffix de segundo nivel que requieren conservar dos labels
-    # (lista pequeña y pragmática — un PSL completo es excesivo aquí).
-    "multi_level_tlds": [
-        "co.uk", "org.uk", "gov.uk", "ac.uk", "co.jp", "com.mx", "com.br",
-        "com.ar", "com.au", "com.es", "co.in", "co.nz", "com.tr", "com.co",
-    ],
-
     # Marcas canónicas usadas por lookalike/typosquat/subdomain checks.
     "canonical_brands": [
         "microsoft", "paypal", "netflix", "amazon", "google", "apple",
@@ -468,6 +462,9 @@ def _tuple_of(key: str) -> tuple[str, ...]:
     return _cached_tuple(CR.config_version(), key)
 
 
+#: Paquetes cuyos datos empaquetados deciden igual que un dataset.
+_FINGERPRINT_PACKAGES = ("publicsuffixlist", "confusable-homoglyphs")
+
 #: Datasets que viven solo en la configuración (sin default en ``_DEFAULTS``)
 #: y que también cambian el resultado de un análisis.
 _FINGERPRINT_EXTRA_KEYS = ("trusted_authserv_ids",)
@@ -487,6 +484,9 @@ def _datasets_fingerprint(config_version: tuple) -> str:
     effective = {key: _data(key) for key in sorted(_DEFAULTS)}
     for key in _FINGERPRINT_EXTRA_KEYS:
         effective.setdefault(key, CR.get_iris_data(key))
+    # La Public Suffix List y la tabla de confusables también deciden: una
+    # versión nueva de cualquiera de las dos puede cambiar un veredicto.
+    effective["_packages"] = {package: version(package) for package in _FINGERPRINT_PACKAGES}
     material = json.dumps(effective, sort_keys=True, ensure_ascii=False, default=list)
     return "iris-data:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
 
@@ -507,9 +507,6 @@ def datasets_fingerprint() -> str:
 
 
 # --- Accessors públicos (uno por dataset) ------------------------------------
-
-def multi_level_tlds() -> frozenset[str]:
-    return _set_of("multi_level_tlds")
 
 def canonical_brands() -> frozenset[str]:
     return _set_of("canonical_brands")

@@ -4,10 +4,10 @@
       <h2>Nuevo Análisis</h2>
       <p class="form-hint">
         Arrastra un archivo .eml o pega las cabeceras, y elige qué parte del correo quieres que Iris examine.
-        Para varios correos a la vez, suelta varios .eml o un ZIP, o
+        Para varios correos a la vez o para un .msg de Outlook, suelta los ficheros o un ZIP, o
         <label class="batch-link">
           elige un lote
-          <input type="file" accept=".eml,.zip,message/rfc822,application/zip" multiple class="batch-input" @change="pickBatch" />
+          <input type="file" accept=".eml,.msg,.zip,message/rfc822,application/vnd.ms-outlook,application/zip" multiple class="batch-input" @change="pickBatch" />
         </label>.
       </p>
     </div>
