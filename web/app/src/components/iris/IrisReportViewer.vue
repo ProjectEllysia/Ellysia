@@ -96,7 +96,25 @@
       </div>
 
       <!-- Score + Verdict hero -->
-      <IrisVerdictHero :score="reportData.totalScore" :verdict="reportData.verdict" />
+      <IrisVerdictHero
+        :score="reportData.totalScore"
+        :verdict="reportData.verdict"
+        :confidence="reportData.confidence"
+        :coverage-mode="reportData.coverage?.mode ?? null"
+      />
+
+      <!-- Incertidumbre: por qué la confianza no es alta. Va junto al veredicto
+           porque lo matiza; en solo cabeceras lista además qué reglas no
+           tuvieron cuerpo, enlaces ni adjuntos que inspeccionar. -->
+      <div v-if="uncertaintyReasons.length || uncoveredRules.length" class="rv-uncertainty">
+        <strong class="uncertainty-title">Qué limita este veredicto</strong>
+        <ul v-if="uncertaintyReasons.length" class="uncertainty-list">
+          <li v-for="(reason, i) in uncertaintyReasons" :key="i">{{ reason }}</li>
+        </ul>
+        <p v-if="uncoveredRules.length" class="uncertainty-rules">
+          Sin contenido que inspeccionar: {{ uncoveredRules.join(' · ') }}
+        </p>
+      </div>
 
       <!-- Análisis degradado: alguna regla no llegó a ejecutarse, así que
            una parte del mensaje no se ha inspeccionado. Va inmediatamente
@@ -345,6 +363,15 @@ const failedRuleNames = computed(() =>
 )
 const isDegraded = computed(() =>
   props.reportData?.analysisQuality === 'degraded' || failedRuleNames.value.length > 0
+)
+// Confianza ordinal y cobertura (ver IrisVerdictHero). Los motivos y las
+// reglas sin contenido vienen ya calculados por la API: el componente no
+// reinterpreta nada, para que UI, PDF y resumen de IA digan lo mismo.
+const uncertaintyReasons = computed(() => props.reportData?.uncertaintyReasons ?? [])
+const uncoveredRules = computed(() =>
+  props.reportData?.coverage?.mode === 'headers_only'
+    ? (props.reportData.coverage.uncoveredRules ?? [])
+    : []
 )
 const passedRules = computed(() => rulesWithIndex.value.filter(entry => entry.rule.verdict === 'pass'))
 const passedRulesOpen = ref(false)
@@ -866,6 +893,35 @@ watch(
 }
 
 .degraded-rules {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.rv-uncertainty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-med);
+  color: var(--text);
+}
+
+.uncertainty-title {
+  font-size: var(--fs-md);
+}
+
+.uncertainty-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--fs-md);
+  line-height: 1.6;
+}
+
+.uncertainty-rules {
   margin: 0;
   font-size: var(--fs-sm);
   color: var(--text-muted);
