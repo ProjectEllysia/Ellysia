@@ -68,6 +68,12 @@ _AUTHORIZED_DIRECTION_EXCEPTIONS = {
     # CR.THEMIS_SCANNERS se deriva de ScanType a propósito (CLAUDE.md § Configuración).
     ("src/modules/system/config_reading.py", "features.themis"),
 }
+#: ``config_reading`` es una hoja (solo depende de la stdlib y de ``shared._exceptions``):
+#: cualquier módulo puede leer la configuración, también ``shared`` e ``infrastructure``.
+_CONFIG_READING_MODULE = "src.modules.system.config_reading"
+#: Un ``endpoints.py`` es un borde HTTP: puede usar la superficie pública de este
+#: módulo (los decoradores de permisos) aunque el suyo tenga un rango menor.
+_AUTHORIZATION_MODULE = "users"
 
 #: Métodos privados que sobrescriben un método de una librería externa; el grafo de
 #: herencia de ``src/`` no los ve. Clave: (ruta, ``Clase._método``); valor: la librería.
@@ -809,8 +815,6 @@ KNOWN_VIOLATIONS: dict[tuple[str, str, str], str] = {
     ("private-method", "src/modules/users/services/scheduling.py", "UsersScheduler._run_mfa_reminders"):
         _PLAN_PRIVATE_METHOD,
     # --- module-internals-import
-    ("module-internals-import", "src/modules/accounts/endpoints.py", "src.modules.users.services.permissions.Role"):
-        _PLAN_MODULE_INTERNALS,
     ("module-internals-import", "src/modules/accounts/managers/invitations.py", "src.modules.users.repositories.UserRepository"):
         _PLAN_MODULE_INTERNALS,
     ("module-internals-import", "src/modules/accounts/managers/invitations.py", "src.modules.users.services.secrets.generate_opaque_token"):
@@ -822,8 +826,6 @@ KNOWN_VIOLATIONS: dict[tuple[str, str, str], str] = {
     ("module-internals-import", "src/modules/features/hygeia/services/enrollment.py", "src.modules.users.services.secrets.hash_password"):
         _PLAN_MODULE_INTERNALS,
     ("module-internals-import", "src/modules/features/hygeia/services/enrollment.py", "src.modules.users.services.secrets.verify_password"):
-        _PLAN_MODULE_INTERNALS,
-    ("module-internals-import", "src/modules/system/endpoints.py", "src.modules.users.services.permissions.Role"):
         _PLAN_MODULE_INTERNALS,
     ("module-internals-import", "src/modules/users/managers.py", "src.modules.accounts.repositories.OrganizationMemberRepository"):
         _PLAN_MODULE_INTERNALS,
@@ -863,19 +865,7 @@ KNOWN_VIOLATIONS: dict[tuple[str, str, str], str] = {
         _PLAN_DIRECTION,
     ("module-direction", "src/modules/accounts/services/limits.py", "src.modules.features.themis.model.ProgramedScan"):
         _PLAN_DIRECTION,
-    ("module-direction", "src/modules/infrastructure/engine.py", "src.modules.system.config_reading"):
-        _PLAN_DIRECTION,
-    ("module-direction", "src/modules/shared/_crypto.py", "src.modules.system.config_reading"):
-        _PLAN_DIRECTION,
     ("module-direction", "src/modules/shared/_documents.py", "src.modules.system.taskqueue.TaskTrackingMixin"):
-        _PLAN_DIRECTION,
-    ("module-direction", "src/modules/shared/_endpoints.py", "src.modules.system.config_reading"):
-        _PLAN_DIRECTION,
-    ("module-direction", "src/modules/system/endpoints.py", "src.modules.users.require_oauth_token"):
-        _PLAN_DIRECTION,
-    ("module-direction", "src/modules/system/endpoints.py", "src.modules.users.require_role"):
-        _PLAN_DIRECTION,
-    ("module-direction", "src/modules/system/endpoints.py", "src.modules.users.services.permissions.Role"):
         _PLAN_DIRECTION,
     ("module-direction", "src/modules/users/__init__.py", "src.modules.features.acheron.model.Vault"):
         _PLAN_DIRECTION,
@@ -1367,24 +1357,49 @@ def find_private_name_imports(source: SourceFile) -> set[tuple[str, str, str]]:
     }
 
 
+def is_authorized_direction(source: SourceFile, target: str, target_owner: str) -> bool:
+    """Indica si una dependencia hacia un rango mayor está autorizada por § 3.4.
+
+    Hay tres autorizaciones: ``config_reading`` → ``ScanType`` de Themis; cualquier
+    fichero → ``config_reading``; y un ``endpoints.py`` → la superficie de ``users``.
+
+    Args:
+        source: Fichero que importa.
+        target: Nombre absoluto importado (``src.modules.system.config_reading``).
+        target_owner: Módulo del convenio al que pertenece ``target``.
+
+    Returns:
+        bool: ``True`` si el import está autorizado aunque suba de rango.
+    """
+    if (source.path, target_owner) in _AUTHORIZED_DIRECTION_EXCEPTIONS:
+        return True
+    if target == _CONFIG_READING_MODULE or target.startswith(f"{_CONFIG_READING_MODULE}."):
+        return True
+    return source.path.endswith("/endpoints.py") and target_owner == _AUTHORIZATION_MODULE
+
+
 def find_reverse_dependencies(source: SourceFile) -> set[tuple[str, str, str]]:
     """Regla 5: imports hacia un módulo de rango mayor que el propio (§ 3.4).
+
+    Los ficheros de ``src/`` que no están en ningún módulo (hoy solo
+    ``src/__init__.py``) cuentan como rango 0: Python los ejecuta antes que
+    cualquier ``src.modules.x.y``, así que no pueden depender de nadie.
 
     Args:
         source: Fichero a revisar.
 
     Returns:
         set[tuple[str, str, str]]: Las violaciones, con el nombre importado como
-            símbolo; vacío si no hay ninguna. Los ficheros o destinos sin rango
+            símbolo; vacío si no hay ninguna. Los módulos o destinos sin rango
             no se evalúan (``test_every_module_has_a_rank`` los vigila).
     """
-    source_rank = rank_of(source.owner) if source.owner else None
+    source_rank = 0 if source.owner is None else rank_of(source.owner)
     if source_rank is None:
         return set()
     violations = set()
     for target, _ in iter_import_targets(source):
         target_owner = owner_module_of(target)
-        if target_owner is None or (source.path, target_owner) in _AUTHORIZED_DIRECTION_EXCEPTIONS:
+        if target_owner is None or is_authorized_direction(source, target, target_owner):
             continue
         target_rank = rank_of(target_owner)
         if target_rank is not None and target_rank > source_rank:
@@ -1608,8 +1623,23 @@ class TestDirectionDetector:
             (RULE_DIRECTION, source.path, "src.modules.features.acheron.Vault"),
         }
 
-    def test_ignores_downward_imports_and_authorized_exception(self):
-        """Importar hacia abajo vale, y ``config_reading`` → ``ScanType`` está autorizado."""
+    def test_detects_root_package_and_narrow_authorizations(self):
+        """``src/__init__.py`` es rango 0, y las autorizaciones no se extienden a sus vecinos."""
+        root_package = parse_source("src/__init__.py", "from src.modules.features.themis import NmapScanManager")
+        shared = parse_source("src/modules/shared/_documents.py", "from src.modules.system.taskqueue import Task")
+        system_manager = parse_source("src/modules/system/managers.py", "from src.modules.users import require_role")
+        assert find_reverse_dependencies(root_package) == {
+            (RULE_DIRECTION, root_package.path, "src.modules.features.themis.NmapScanManager"),
+        }
+        assert find_reverse_dependencies(shared) == {
+            (RULE_DIRECTION, shared.path, "src.modules.system.taskqueue.Task"),
+        }
+        assert find_reverse_dependencies(system_manager) == {
+            (RULE_DIRECTION, system_manager.path, "src.modules.users.require_role"),
+        }
+
+    def test_ignores_downward_imports_and_authorized_exceptions(self):
+        """Importar hacia abajo vale, igual que las tres dependencias autorizadas por § 3.4."""
         feature = parse_source(_MANAGER_PATH, """
             from src.modules.users import User
             from src.modules.shared import is_private_target
@@ -1618,5 +1648,14 @@ class TestDirectionDetector:
         config_reading = parse_source(
             "src/modules/system/config_reading.py", "from src.modules.features.themis.model import ScanType"
         )
+        shared = parse_source("src/modules/shared/_crypto.py", """
+            import src.modules.system.config_reading as CR
+            from src.modules.system import config_reading
+        """)
+        system_endpoints = parse_source(
+            "src/modules/system/endpoints.py", "from src.modules.users import Role, require_role"
+        )
         assert find_reverse_dependencies(feature) == set()
         assert find_reverse_dependencies(config_reading) == set()
+        assert find_reverse_dependencies(shared) == set()
+        assert find_reverse_dependencies(system_endpoints) == set()
