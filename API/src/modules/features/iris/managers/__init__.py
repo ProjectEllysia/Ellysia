@@ -14,6 +14,8 @@ Managers del módulo Iris (análisis de correo).
   escritura de las preferencias de notificación de un usuario.
 - ``IrisFeedbackManager`` (``feedback.py``): correcciones del analista y
   métricas del detector calculadas a partir de ellas.
+- ``IrisReplayManager`` (``replay.py``): simulador de reglas para
+  administradores — compara políticas de puntuación sobre el corpus.
 
 Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el
@@ -33,10 +35,12 @@ from .reports import IrisReportManager
 from .mailbox import IrisMailboxManager
 from .notifications import IrisPhishingNotifyManager, IrisNotificationPreferenceManager
 from .feedback import IrisFeedbackManager
+from .replay import IrisReplayManager
 
 __all__ = [
     "IrisManager",
     "IrisFeedbackManager",
+    "IrisReplayManager",
     "IrisReportManager",
     "IrisMailboxManager",
     "IrisPhishingNotifyManager",

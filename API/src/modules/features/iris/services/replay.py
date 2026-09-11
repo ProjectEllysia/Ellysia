@@ -20,8 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
-from .feedback_metrics import compute_feedback_metrics, outcome_from_rules
+from .feedback_metrics import LABEL_LEGITIMATE, LABEL_MALICIOUS, compute_feedback_metrics, outcome_from_rules
 from .scoring import ScoringPolicy
+
+#: Corpus versionado que viaja con la aplicación: vive en ``API/resources/``,
+#: que la imagen Docker copia junto al código (``tests/`` no se copia).
+CORPUS_DIRECTORY = Path(__file__).resolve().parents[5] / "resources" / "iris" / "corpus"
 
 #: Evalúa un mensaje crudo bajo una política y devuelve ``verdict``,
 #: ``totalScore``, ``gateReasons``, ``rules`` (pares nombre/score del contexto
@@ -86,8 +90,10 @@ def replay(samples: List[ReplaySample], policies: Mapping[str, ScoringPolicy], e
 
     Returns:
         dict: ``baseline`` (nombre de la referencia), ``policies`` (por
-            nombre: ``scoringVersion``, ``snapshot`` y ``metrics`` frente a
-            las etiquetas), ``samples`` (por muestra: ``id``, ``label``,
+            nombre: ``scoringVersion``, ``snapshot``, ``metrics`` frente a
+            las etiquetas y los ids de sus falsos positivos y negativos
+            conocidos, ``falsePositiveSamples``/``falseNegativeSamples``),
+            ``samples`` (por muestra: ``id``, ``label``,
             ``results`` por política, ``verdictChanged`` y ``gateChanges``
             con los gates ``added``/``removed`` de cada candidata) y
             ``changedCount``.
@@ -102,6 +108,7 @@ def replay(samples: List[ReplaySample], policies: Mapping[str, ScoringPolicy], e
     families = {family for family in family_of.values() if family}
 
     outcomes: Dict[str, list] = {name: [] for name in names}
+    misclassified = {name: {"falsePositiveSamples": [], "falseNegativeSamples": []} for name in names}
     sample_reports = []
     for sample in samples:
         results = {name: evaluate(sample.raw, policies[name]) for name in names}
@@ -135,6 +142,11 @@ def replay(samples: List[ReplaySample], policies: Mapping[str, ScoringPolicy], e
                     sample.label, result["verdict"], result["rules"], family_of,
                     result["unevaluatedRules"],
                 ))
+                is_flagged = result["verdict"] != "Legitimate"
+                if sample.label == LABEL_LEGITIMATE and is_flagged:
+                    misclassified[name]["falsePositiveSamples"].append(sample.sample_id)
+                elif sample.label == LABEL_MALICIOUS and not is_flagged:
+                    misclassified[name]["falseNegativeSamples"].append(sample.sample_id)
 
     return {
         "baseline": baseline,
@@ -143,6 +155,7 @@ def replay(samples: List[ReplaySample], policies: Mapping[str, ScoringPolicy], e
                 "scoringVersion": policies[name].version(detector),
                 "snapshot": policies[name].snapshot(detector),
                 "metrics": compute_feedback_metrics(outcomes[name], families, analyses_total=len(samples)),
+                **misclassified[name],
             }
             for name in names
         },

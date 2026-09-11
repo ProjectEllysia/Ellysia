@@ -4,7 +4,7 @@ Métricas del detector a partir del feedback del analista.
 El veredicto de Iris es una predicción; la etiqueta del analista es la
 verdad que se usa para medirla. Este módulo es puro —sin ORM ni red— para
 que lo usen igual el endpoint de métricas, que lee etiquetas de la base de
-datos, y el corpus versionado de ``tests/fixtures/iris/``, que trae las suyas
+datos, y el corpus versionado de ``API/resources/iris/corpus/``, que trae las suyas
 en un manifiesto.
 
 Convenciones:

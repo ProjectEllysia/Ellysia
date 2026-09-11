@@ -11,6 +11,7 @@ import src.modules.system.config_reading as CR
 from src.modules.shared import UTCDateTime
 
 from .services.feedback_metrics import FEEDBACK_LABELS
+from .services.scoring import PROFILE_THRESHOLD_OFFSETS
 
 
 class AnalyzeRequestSchema(Schema):
@@ -696,3 +697,59 @@ class IrisNotificationPreferenceUpdateRequestSchema(Schema):
     mutedForMinutes = fields.Integer(validate=validate.Range(min=0))
     notifyReauthRequired = fields.Boolean()
     notifySyncStuck = fields.Boolean()
+
+
+class IrisReplayPolicySpecSchema(Schema):
+    """Descripción de una política de puntuación para el simulador de reglas.
+
+    Vacía, es la vigente. Con ``snapshot`` se reconstruye una política
+    guardada (el ``scoringSnapshot`` de un análisis). Si no, se parte de la
+    vigente y se cambian el perfil, los umbrales efectivos y los pesos
+    indicados; ``weightOverrides`` se **suma** a los pesos vigentes.
+    """
+    snapshot = fields.Dict(load_default=None, allow_none=True)
+    profile = fields.String(load_default=None, allow_none=True,
+                            validate=validate.OneOf(sorted(PROFILE_THRESHOLD_OFFSETS)))
+    legitimateThreshold = fields.Float(load_default=None, allow_none=True,
+                                       validate=validate.Range(min=0, max=100))
+    suspiciousThreshold = fields.Float(load_default=None, allow_none=True,
+                                       validate=validate.Range(min=0, max=100))
+    weightOverrides = fields.Dict(keys=fields.String(), values=fields.Float(),
+                                  load_default=None, allow_none=True)
+
+
+class IrisReplayMessageSchema(Schema):
+    """Un mensaje suelto para el simulador: se compara, pero no se guarda."""
+    raw = fields.String(required=True, validate=validate.Length(min=1))
+    label = fields.String(load_default=None, allow_none=True, validate=validate.OneOf(FEEDBACK_LABELS))
+
+
+class IrisReplayRequestSchema(Schema):
+    """Cuerpo de ``POST /iris/admin/replay``.
+
+    ``candidate`` es la política a probar; ``baseline``, la referencia (por
+    defecto la vigente). Se evalúa el corpus versionado si ``includeCorpus``
+    (por defecto sí) y, además, hasta 20 mensajes sueltos.
+    """
+    candidate = fields.Nested(IrisReplayPolicySpecSchema, required=True)
+    baseline = fields.Nested(IrisReplayPolicySpecSchema, load_default=None, allow_none=True)
+    messages = fields.List(fields.Nested(IrisReplayMessageSchema), load_default=list,
+                           validate=validate.Length(max=20))
+    includeCorpus = fields.Boolean(load_default=True)
+
+
+class IrisReplayResponseSchema(Schema):
+    """Informe del simulador de reglas.
+
+    ``policies`` trae, para ``baseline`` y ``candidate``, su
+    ``scoringVersion``, su ``snapshot``, sus ``metrics`` frente a las
+    etiquetas y los ids de sus falsos positivos y negativos conocidos.
+    ``samples`` trae, por muestra, el resultado de cada política, si cambió
+    el veredicto y qué gates añade o quita la candidata.
+    """
+    baseline = fields.String()
+    corpusVersion = fields.String(allow_none=True)
+    detectorVersion = fields.String()
+    policies = fields.Dict()
+    samples = fields.List(fields.Dict())
+    changedCount = fields.Integer()

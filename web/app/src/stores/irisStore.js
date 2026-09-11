@@ -380,6 +380,25 @@ export const useIrisStore = defineStore('iris', () => {
   }
 
   /**
+   * Simulador de reglas (solo administradores): compara la política de
+   * puntuación vigente con una candidata sobre el corpus. No guarda nada.
+   * @param {object} payload Cuerpo de POST /iris/admin/replay (candidate,
+   *   includeCorpus y, opcionalmente, messages).
+   * @returns {Promise<object|null>} El informe de replay, o null si falló.
+   */
+  async function runReplay(payload) {
+    const res = await apiFetch('/iris/admin/replay', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo ejecutar el simulador de reglas.'), 'error')
+      return null
+    }
+    return res.json()
+  }
+
+  /**
    * Registra si el veredicto de un análisis era correcto. No cambia el
    * veredicto: se relee el informe para mostrar la corrección vigente.
    * @param {number} id Análisis corregido.
@@ -629,7 +648,7 @@ export const useIrisStore = defineStore('iris', () => {
     submitAnalysis, fetchResults, getReport, getStatus, pathFor, iocsFor,
     resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,
     generateAiSummary, checkAiSummary,
-    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, submitFeedback,
+    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, submitFeedback, runReplay,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,
     stopDocumentPolling,
