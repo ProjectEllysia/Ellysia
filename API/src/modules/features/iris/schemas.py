@@ -5,31 +5,62 @@ Fields use camelCase for JSON keys as per the project convention.
 
 from __future__ import annotations
 
-from marshmallow import Schema, ValidationError, fields, validate, validates_schema
+from marshmallow import Schema, ValidationError, fields, post_load, validate, validates_schema
 
 import src.modules.system.config_reading as CR
 from src.modules.shared import UTCDateTime
 
 from .services.feedback_metrics import FEEDBACK_LABELS
 from .model import TrustKind
+from .services.quality import AnalysisMode
 from .services.scoring import PROFILE_THRESHOLD_OFFSETS
 from .services.trust import MAX_TRUST_EXPIRY_DAYS, MAX_TRUST_REASON_LENGTH
 
 
-class AnalyzeRequestSchema(Schema):
-    """Request body for ``POST /iris/analyze``.
+def _input_fields_in_use(data: dict) -> tuple[str, ...]:
+    """Campos de entrada que va a analizar una petición de ``POST /iris/analyze``.
 
-    Accepts either ``headers`` (a headers-only block, original behaviour)
-    or ``message`` (a full raw ``.eml`` message). At least one of
-    the two is required; if both are present, ``message`` takes priority
-    since it is a superset of the header information.
+    Args:
+        data: Cuerpo ya deserializado.
+
+    Returns:
+        tuple[str, ...]: ``("headers",)`` en modo cabeceras, ``("message",)`` en
+            modo completo, o los dos si la petición no trae ``mode``.
+    """
+    mode = data.get("mode")
+    if mode == AnalysisMode.HEADERS:
+        return ("headers",)
+    if mode == AnalysisMode.MESSAGE:
+        return ("message",)
+    return ("headers", "message")
+
+
+class AnalyzeRequestSchema(Schema):
+    """Cuerpo de ``POST /iris/analyze``.
+
+    ``mode`` dice qué se analiza: ``headers`` (el bloque de cabeceras de
+    ``headers``) o ``message`` (el ``.eml`` completo de ``message``). Con
+    modo, solo se valida y se usa el campo de ese modo y el otro se descarta,
+    así que elegir solo cabeceras nunca falla por el tamaño de un mensaje que
+    no se va a analizar. Sin ``mode`` (clientes que no lo envían) basta con
+    cualquiera de los dos y, si vienen ambos, ``message`` tiene prioridad por
+    ser un superconjunto de las cabeceras.
     """
     title = fields.String(load_default=None, validate=validate.Length(max=120))
+    mode = fields.String(load_default=None, validate=validate.OneOf([mode.value for mode in AnalysisMode]))
     headers = fields.String(load_default=None, validate=validate.Length(min=10))
     message = fields.String(load_default=None, validate=validate.Length(min=10))
 
     @validates_schema
     def validate_has_input(self, data, **kwargs):
+        """Exige el campo que corresponde al modo, o al menos uno sin modo."""
+        mode = data.get("mode")
+        if mode == AnalysisMode.HEADERS and not data.get("headers"):
+            raise ValidationError("El modo 'headers' necesita el campo 'headers'.", field_name="headers")
+        if mode == AnalysisMode.MESSAGE and not data.get("message"):
+            raise ValidationError(
+                "El modo 'message' necesita el campo 'message' (el .eml completo).", field_name="message",
+            )
         if not data.get("headers") and not data.get("message"):
             raise ValidationError(
                 "Debe proporcionar 'headers' (cabeceras) o 'message' (mensaje completo .eml).",
@@ -38,21 +69,41 @@ class AnalyzeRequestSchema(Schema):
 
     @validates_schema
     def validate_max_size(self, data, **kwargs):
-        """Sin tope superior, un .eml de decenas de MB (adjuntos incluidos)
-        entraba entero a una columna Text y se re-parseaba completo (incluida
-        la decodificación base64) en cada lectura posterior. Leído con CR en
-        cada validación, no horneado al importar el módulo, para que un
-        cambio vía PUT /system surta efecto sin reiniciar la API (mismo
-        patrón que ``hygeia/schemas.py::validate_array_limits``).
+        """Rechaza la entrada que se va a analizar si supera ``iris.maxMessageBytes``.
+
+        Sin tope superior, un .eml de decenas de MB (adjuntos incluidos)
+        entraría entero a una columna Text y se re-parsearía completo (incluida
+        la decodificación base64) en cada lectura posterior. Solo se mira el
+        campo que usa el modo (``_input_fields_in_use``). Leído con CR en cada
+        validación, no horneado al importar el módulo, para que un cambio vía
+        PUT /system surta efecto sin reiniciar la API (mismo patrón que
+        ``hygeia/schemas.py::validate_array_limits``).
         """
         max_bytes = CR.iris_config().max_message_bytes
-        for field_name in ("headers", "message"):
+        for field_name in _input_fields_in_use(data):
             value = data.get(field_name)
             if value and len(value.encode("utf-8", errors="ignore")) > max_bytes:
                 raise ValidationError(
                     f"'{field_name}' excede el tamaño máximo permitido ({max_bytes} bytes).",
                     field_name=field_name,
                 )
+
+    @post_load
+    def drop_unused_input(self, data, **kwargs):
+        """Descarta el campo de entrada que el modo elegido no usa.
+
+        Así el endpoint y el manager siguen recibiendo ``headers`` y
+        ``message`` como siempre, y con modo solo llega relleno el que toca.
+
+        Returns:
+            dict: Los datos con ``message`` a ``None`` en modo cabeceras, o
+                ``headers`` a ``None`` en modo completo; sin modo, intactos.
+        """
+        in_use = _input_fields_in_use(data)
+        for field_name in ("headers", "message"):
+            if field_name not in in_use:
+                data[field_name] = None
+        return data
 
 
 class IrisCapabilitiesResponseSchema(Schema):
@@ -63,6 +114,11 @@ class IrisCapabilitiesResponseSchema(Schema):
     servidor, y el usuario se lleva el rechazo después de haber cargado el
     fichero entero en memoria.
 
+    ``headersOnlyUncoveredRules`` son las reglas que no tendrán nada que
+    inspeccionar en modo cabeceras, y ``fullMessageNotice`` el aviso de que el
+    modo completo puede incluir datos sensibles: la interfaz los enseña al
+    elegir el modo, antes de enviar.
+
     ``verdictThresholds`` viaja ya en la respuesta del listado; se repite aquí
     para que una vista que aún no ha listado nada pueda pintar la escala de
     riesgo sin pedir primero una página de resultados.
@@ -70,6 +126,8 @@ class IrisCapabilitiesResponseSchema(Schema):
     maxMessageBytes = fields.Integer()
     minHeaders = fields.Integer()
     analysisModes = fields.List(fields.String())
+    headersOnlyUncoveredRules = fields.List(fields.String())
+    fullMessageNotice = fields.String()
     verdictThresholds = fields.Nested(lambda: VerdictThresholdsSchema())
 
 
