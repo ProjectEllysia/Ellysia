@@ -116,6 +116,42 @@
         </p>
       </div>
 
+      <!-- Feedback del analista: corrige el resultado en dos clics (etiqueta y
+           Guardar). Nunca cambia el veredicto de arriba; alimenta las métricas
+           y la calibración del detector. -->
+      <div class="rv-feedback">
+        <div class="feedback-row">
+          <span class="feedback-title">¿Es correcto este veredicto?</span>
+          <div class="feedback-actions">
+            <button
+              v-for="option in FEEDBACK_OPTIONS"
+              :key="option.value"
+              type="button"
+              class="feedback-option"
+              :class="{ 'feedback-option--active': feedbackLabel === option.value }"
+              @click="feedbackLabel = option.value"
+            >{{ option.label }}</button>
+          </div>
+        </div>
+        <div v-if="feedbackLabel" class="feedback-form">
+          <textarea
+            v-model="feedbackNote"
+            class="feedback-note"
+            maxlength="2000"
+            rows="2"
+            placeholder="Nota opcional (por qué)"
+          ></textarea>
+          <button type="button" class="feedback-save" :disabled="feedbackSaving" @click="saveFeedback">
+            Guardar
+          </button>
+        </div>
+        <p v-if="reportData.latestFeedback" class="feedback-current">
+          Revisado como <strong>{{ FEEDBACK_LABELS[reportData.latestFeedback.label] }}</strong>
+          por {{ reportData.latestFeedback.author }} · {{ formatDate(reportData.latestFeedback.createdAt) }}
+          <template v-if="reportData.latestFeedback.note"> — «{{ reportData.latestFeedback.note }}»</template>
+        </p>
+      </div>
+
       <!-- Análisis degradado: alguna regla no llegó a ejecutarse, así que
            una parte del mensaje no se ha inspeccionado. Va inmediatamente
            debajo del veredicto porque lo matiza: quien lea el número grande
@@ -417,6 +453,35 @@ const uncoveredRules = computed(() =>
 )
 const passedRules = computed(() => rulesWithIndex.value.filter(entry => entry.rule.verdict === 'pass'))
 const passedRulesOpen = ref(false)
+
+// Feedback del analista (ver el bloque .rv-feedback de la plantilla).
+const FEEDBACK_OPTIONS = [
+  { value: 'malicious', label: 'Es malicioso' },
+  { value: 'legitimate', label: 'Es legítimo' },
+  { value: 'unknown', label: 'No se puede saber' },
+]
+const FEEDBACK_LABELS = { malicious: 'malicioso', legitimate: 'legítimo', unknown: 'indeterminado' }
+const feedbackLabel = ref(null)
+const feedbackNote = ref('')
+const feedbackSaving = ref(false)
+
+watch(() => props.reportData?.analysisId, () => {
+  feedbackLabel.value = null
+  feedbackNote.value = ''
+})
+
+async function saveFeedback() {
+  feedbackSaving.value = true
+  const saved = await irisStore.submitFeedback(props.reportData.analysisId, {
+    label: feedbackLabel.value,
+    note: feedbackNote.value.trim() || null,
+  })
+  feedbackSaving.value = false
+  if (saved) {
+    feedbackLabel.value = null
+    feedbackNote.value = ''
+  }
+}
 
 // Salta a la card de la regla señalada en "Principales señales", la expande
 // y la desplaza a la vista (llamado desde los chips de topSignals). Si la
@@ -968,6 +1033,77 @@ watch(
   font-size: var(--fs-sm);
   color: var(--text-muted);
   word-break: break-word;
+}
+
+.rv-feedback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.feedback-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.feedback-title {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.feedback-option,
+.feedback-save {
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-med);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.feedback-option--active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.feedback-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.feedback-note {
+  flex: 1;
+  min-height: 2.4rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-med);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  resize: vertical;
+}
+
+.feedback-current {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
 }
 
 .raw-line--hit {

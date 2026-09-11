@@ -404,6 +404,11 @@ class IrisManager(TaskTrackingMixin):
         winning_message = context_of_type(context, analysis.winning_context)
         preview = preview_headers(winning_message) if analysis.raw_headers else None
 
+        # Import tardío: el manager de feedback depende de este para
+        # comprobar la propiedad del análisis.
+        from .feedback import IrisFeedbackManager
+        latest_feedback = IrisFeedbackManager.latest_for_analysis(analysis_id)
+
         return {
             "analysisId": analysis.id,
             "title": analysis.title,
@@ -437,6 +442,7 @@ class IrisManager(TaskTrackingMixin):
             "user": username,
             "rules": rules_data,
             "recommendations": recommendations,
+            "latestFeedback": latest_feedback,
         }
 
     @staticmethod

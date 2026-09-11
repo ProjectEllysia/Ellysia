@@ -380,6 +380,27 @@ export const useIrisStore = defineStore('iris', () => {
   }
 
   /**
+   * Registra si el veredicto de un análisis era correcto. No cambia el
+   * veredicto: se relee el informe para mostrar la corrección vigente.
+   * @param {number} id Análisis corregido.
+   * @param {{label: 'malicious'|'legitimate'|'unknown', note?: string|null}} feedback
+   * @returns {Promise<boolean>} true si se guardó.
+   */
+  async function submitFeedback(id, { label, note = null } = {}) {
+    const res = await apiFetch(`/iris/results/${id}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ label, note }),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo guardar la corrección.'), 'error')
+      return false
+    }
+    toast.show('Corrección guardada. El veredicto original no cambia.', 'success')
+    await getReport(id)
+    return true
+  }
+
+  /**
    * Solicita la narrativa ejecutiva IA (IA1) y sondea el informe hasta que
    * aparece `aiSummary` — no hay endpoint de estado propio, la narrativa es
    * simplemente un campo más del informe principal una vez generada.
@@ -608,7 +629,7 @@ export const useIrisStore = defineStore('iris', () => {
     submitAnalysis, fetchResults, getReport, getStatus, pathFor, iocsFor,
     resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,
     generateAiSummary, checkAiSummary,
-    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis,
+    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, submitFeedback,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,
     stopDocumentPolling,

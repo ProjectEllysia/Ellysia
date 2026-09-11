@@ -82,6 +82,9 @@ _ENDPOINTS = [
     ("get", "/iris/notification-preferences", AttributeType.IRIS_READ, None),
     ("put", "/iris/notification-preferences", AttributeType.IRIS_UPDATE, {}),
     ("get", "/iris/retention-policy", AttributeType.IRIS_READ, None),
+    ("post", "/iris/results/999999/feedback", AttributeType.IRIS_UPDATE, {"label": "malicious"}),
+    ("get", "/iris/results/999999/feedback", AttributeType.IRIS_READ, None),
+    ("get", "/iris/feedback/metrics", AttributeType.IRIS_READ, None),
 ]
 
 _ALL_IRIS_ATTRIBUTES = [

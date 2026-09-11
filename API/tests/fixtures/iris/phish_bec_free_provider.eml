@@ -1,0 +1,12 @@
+From: "Juan Perez (CEO)" <juan.perez.ceo@gmail.com>
+To: finanzas@acme.com
+Subject: Transferencia urgente
+Date: Mon, 07 Sep 2026 09:30:00 +0000
+Message-ID: <bec1@gmail.com>
+Authentication-Results: mx.acme.com; spf=pass smtp.mailfrom=gmail.com; dkim=pass header.d=gmail.com; dmarc=pass
+Content-Type: text/plain; charset=utf-8
+
+Necesito que proceses el pago de una factura pendiente hoy mismo, es confidencial, no lo comentes con nadie mas del equipo. Te paso los datos bancarios nuevos en cuanto confirmes que puedes hacerlo.
+
+Gracias,
+Juan
