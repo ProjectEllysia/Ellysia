@@ -18,7 +18,7 @@ from ..registry import iris_rules, RuleResult
 
 
 @iris_rules.register(
-    name="List-Unsubscribe", category="header_analysis",
+    name="List-Unsubscribe", evidence_headers=("list-unsubscribe",), category="header_analysis",
     description="Detecta un mecanismo de baja (List-Unsubscribe) válido como señal débil de legitimidad de correo masivo",
 )
 def check_list_unsubscribe(headers: dict) -> RuleResult:

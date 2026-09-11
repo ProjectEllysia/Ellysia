@@ -477,6 +477,9 @@ class IrisPDFCreator:
 
     _CONFIDENCE_LABELS = {"high": "Alta", "medium": "Media", "low": "Baja"}
 
+    #: Extractos de evidencia por hallazgo en el PDF; el resto se resume.
+    _EVIDENCE_PER_RULE = 3
+
     def append_confidence(self, elements: list, theme: IrisReportTheme) -> None:
         """Confianza y cobertura del veredicto, justo debajo de él.
 
@@ -653,6 +656,15 @@ class IrisPDFCreator:
             elements.append(Spacer(1, 0.08 * inch))
             for flagged_rule in flagged:
                 text = f"<b>{_esc(flagged_rule.get('ruleName'))}:</b> {_esc(flagged_rule.get('recommendation'))}"
+                # El extracto ya viene desactivado (hxxp, [.], [@]): el PDF sale
+                # del panel autenticado y no debe llevar enlaces vivos.
+                evidence = flagged_rule.get("evidence") or []
+                for item in evidence[:self._EVIDENCE_PER_RULE]:
+                    text += f"<br/>Evidencia: <font face='Courier'>{_esc(item.get('excerpt'))}</font>"
+                if len(evidence) > self._EVIDENCE_PER_RULE:
+                    text += f"<br/>(y {len(evidence) - self._EVIDENCE_PER_RULE} fragmentos más)"
+                if not evidence and flagged_rule.get("evidenceUnavailableReason"):
+                    text += f"<br/><i>Sin evidencia anclada: {_esc(flagged_rule['evidenceUnavailableReason'])}</i>"
                 elements.append(Paragraph(text, theme.body))
             elements.append(Spacer(1, 0.15 * inch))
 

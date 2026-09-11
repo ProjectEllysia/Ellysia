@@ -288,3 +288,23 @@ def test_confidence_card_shows_level_coverage_and_reasons_without_a_percentage()
 
 def test_confidence_card_is_omitted_for_reports_without_confidence():
     assert _rendered_confidence_text(_sample_report()) == ""
+
+
+# ------------------------------------------------ evidencia anclada
+
+def test_finding_detail_shows_the_defanged_evidence_and_the_unanchorable_reason():
+    report = _sample_report(rules=[
+        {"ruleName": "Body Links", "category": "content_analysis", "score": -25, "verdict": "fail",
+         "details": {}, "recommendation": "No hagas clic.",
+         "evidence": [{"kind": "url", "locator": {"linkIndex": 0},
+                       "excerpt": "hxxp://192.168.10.20/login"}]},
+        {"ruleName": "Body Content", "category": "content_analysis", "score": -10, "verdict": "fail",
+         "details": {}, "recommendation": "Cuidado.",
+         "evidence": [], "evidenceUnavailableReason": "La regla evalúa el cuerpo en conjunto."},
+    ])
+    creator = IrisPDFCreator(report=report)
+    elements: list = []
+    creator.append_rules(elements, _theme())
+    text = "\n".join(element.text for element in elements if hasattr(element, "text"))
+    assert "hxxp://192.168.10.20/login" in text
+    assert "Sin evidencia anclada: La regla evalúa el cuerpo en conjunto." in text

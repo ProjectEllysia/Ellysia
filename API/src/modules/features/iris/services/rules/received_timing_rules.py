@@ -26,6 +26,7 @@ from typing import List
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
+from ..evidence import received_hop_evidence, unique_evidence
 from ..parsers import _hop_timestamp, _is_private_ip, build_path, parse_received_line
 from ..text import extract_domain, registrable_domain
 
@@ -38,7 +39,7 @@ CLOCK_SKEW_TOLERANCE_SECONDS = 300
 
 
 @iris_rules.register(
-    name="Date Header Anomaly", category="header_analysis", family="received",
+    name="Date Header Anomaly", evidence_headers=("date",), category="header_analysis", family="received",
     description="Detecta si la cabecera Date está ausente, en el futuro lejano o en el pasado remoto",
 )
 def check_date_anomaly(headers: dict) -> RuleResult:
@@ -107,7 +108,7 @@ def check_date_anomaly(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Received Chain", category="header_analysis", family="received",
+    name="Received Chain", evidence_headers=("received",), category="header_analysis", family="received",
     description=(
         "Analiza la cadena completa de cabeceras Received: número de saltos y "
         "consistencia temporal con Date. La IP interna del salto de origen se "
@@ -181,7 +182,7 @@ def check_received_chain(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Received Chain Temporal Inconsistency",
+    name="Received Chain Temporal Inconsistency", is_self_anchoring=True,
     category="header_analysis", family="received",
     description=(
         "Detecta cadenas Received: con marcas de tiempo no monótonamente "
@@ -218,6 +219,7 @@ def check_received_chain_temporal_inconsistency(context) -> RuleResult:
     # una inversión de unos segundos entre hops consecutivos sin que haya
     # manipulación real; solo una inversión que exceda ese margen es señal.
     inversions: list[dict] = []
+    anchored_evidence: list[dict] = []
     for i in range(len(timestamps) - 1):
         a, b = timestamps[i], timestamps[i + 1]
         if a is None or b is None:
@@ -229,6 +231,8 @@ def check_received_chain_temporal_inconsistency(context) -> RuleResult:
                 "to_hop": i + 1,
                 "delta_seconds": int(delta),
             })
+            anchored_evidence.append(received_hop_evidence(received, i))
+            anchored_evidence.append(received_hop_evidence(received, i + 1))
 
     if not inversions:
         return RuleResult(
@@ -250,6 +254,7 @@ def check_received_chain_temporal_inconsistency(context) -> RuleResult:
             "parsed_timestamps": parsed_count,
             "inversions": inversions,
         },
+        evidence=unique_evidence(anchored_evidence),
         recommendation=(
             f"La cadena Received: contiene {len(inversions)} inversión(es) "
             "temporal(es) — los hops no están en orden cronológico "
@@ -271,7 +276,7 @@ MISSING_TS_MIN_HOPS = 3
 
 
 @iris_rules.register(
-    name="Received Path Anomaly",
+    name="Received Path Anomaly", evidence_headers=("received",),
     category="header_analysis", family="received",
     description=(
         "Evalúa el recorrido Received: del correo — número de saltos, "
@@ -399,7 +404,7 @@ _HOSTNAME_RE = re.compile(r"[a-zA-Z0-9][\w.-]*\.[a-zA-Z]{2,}")
 
 
 @iris_rules.register(
-    name="Origin HELO Coherence",
+    name="Origin HELO Coherence", evidence_headers=("received",),
     category="header_analysis", family="received",
     description=(
         "Aproximación offline (Iris no resuelve DNS/PTR real) de coherencia "
