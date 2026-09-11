@@ -71,12 +71,23 @@
       </div>
 
       <!-- Aviso: el mensaje enviado era un reenvío que envolvía el correo -->
-      <!-- original como adjunto .eml; se analizó el interno, no el envoltorio -->
+      <!-- original como adjunto .eml. Se evalúan los dos y el informe describe -->
+      <!-- el que produjo el veredicto (winningContext); el otro queda como secundario -->
       <div v-if="reportData.unwrappedFromForward" class="rv-unwrap-notice">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="unwrap-icon"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
         <div class="unwrap-text">
           <strong>Correo reenviado como adjunto detectado.</strong>
-          Se analizó el mensaje original adjunto (.eml), no el envoltorio del reenvío.
+          <template v-if="reportData.winningContext === 'wrapper'">
+            El veredicto sale del envoltorio del reenvío, no del mensaje original adjunto.
+          </template>
+          <template v-else>
+            Se analizó el mensaje original adjunto (.eml), no el envoltorio del reenvío.
+          </template>
+          <span v-if="reportData.winningReason" class="unwrap-wrapper-info">{{ reportData.winningReason }}</span>
+          <span v-if="reportData.secondaryContext" class="unwrap-wrapper-info">
+            {{ reportData.secondaryContext.contextType === 'wrapper' ? 'Envoltorio' : 'Original' }}:
+            {{ reportData.secondaryContext.verdict }} ({{ reportData.secondaryContext.totalScore }} puntos)
+          </span>
           <span v-if="reportData.wrapperFrom || reportData.wrapperSubject" class="unwrap-wrapper-info">
             Envoltorio: <template v-if="reportData.wrapperFrom">de {{ reportData.wrapperFrom }}</template>
             <template v-if="reportData.wrapperSubject">— «{{ reportData.wrapperSubject }}»</template>

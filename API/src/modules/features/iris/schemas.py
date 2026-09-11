@@ -157,8 +157,41 @@ class FailedRuleSchema(Schema):
     category = fields.String(load_default=None, allow_none=True)
 
 
+class PreviewHeadersSchema(Schema):
+    """Cabeceras de la vista previa del mensaje que produjo el veredicto.
+
+    Salen del contexto ganador (ver ``winningContext``): en un reenvío cuyo
+    envoltorio es más grave que el original, son las del envoltorio.
+    """
+    subject = fields.String(load_default=None, allow_none=True)
+    from_ = fields.String(data_key="from", attribute="from", load_default=None, allow_none=True)
+    to = fields.String(load_default=None, allow_none=True)
+    replyTo = fields.String(load_default=None, allow_none=True)
+    returnPath = fields.String(load_default=None, allow_none=True)
+    date = fields.String(load_default=None, allow_none=True)
+
+
+class SecondaryContextSchema(Schema):
+    """El otro mensaje de un reenvío: el que **no** decidió el veredicto.
+
+    Se conserva entero —veredicto, score y reglas— para que el analista pueda
+    ver por qué perdió sin que se mezcle con la evidencia del ganador.
+    """
+    contextType = fields.String()
+    verdict = fields.String(load_default=None, allow_none=True)
+    totalScore = fields.Float(load_default=None, allow_none=True)
+    analysisQuality = fields.String(load_default=None, allow_none=True)
+    rules = fields.List(fields.Nested(RuleResultSchema), load_default=None)
+
+
 class AnalysisDetailResponseSchema(Schema):
-    """Full analysis report: headers, per-rule results, verdict."""
+    """Full analysis report: headers, per-rule results, verdict.
+
+    ``winningContext`` dice qué mensaje produjo el veredicto (``inner`` o
+    ``wrapper``); ``rules``, ``topSignals``, ``previewHeaders`` y los IOCs
+    describen siempre ese mensaje. ``secondaryContext`` trae el otro, solo
+    en reenvíos.
+    """
     analysisId = fields.Integer()
     title = fields.String(load_default=None)
     status = fields.String()
@@ -177,6 +210,10 @@ class AnalysisDetailResponseSchema(Schema):
     unwrappedFromForward = fields.Boolean(load_default=False)
     wrapperFrom = fields.String(load_default=None, allow_none=True)
     wrapperSubject = fields.String(load_default=None, allow_none=True)
+    winningContext = fields.String(load_default=None, allow_none=True)
+    winningReason = fields.String(load_default=None, allow_none=True)
+    secondaryContext = fields.Nested(SecondaryContextSchema, load_default=None, allow_none=True)
+    previewHeaders = fields.Nested(PreviewHeadersSchema, load_default=None, allow_none=True)
     startedAt = fields.String(load_default=None)
     finishedAt = fields.String(load_default=None)
     failureCode = fields.String(load_default=None, allow_none=True)
@@ -266,9 +303,11 @@ class ReceivedPathResponseSchema(Schema):
     """Response for ``GET /iris/results/<id>/path``.
 
     ``hops`` and ``transitions`` are empty when no Received chain is
-    available (e.g. headers-only submissions).
+    available (e.g. headers-only submissions). ``contextType`` dice de qué
+    mensaje del reenvío sale la cadena: el mismo que decidió el veredicto.
     """
     analysisId = fields.Integer()
+    contextType = fields.String(load_default=None, allow_none=True)
     available = fields.Boolean()
     hopsCount = fields.Integer()
     hops = fields.List(fields.Nested(ReceivedHopSchema))
@@ -282,9 +321,11 @@ class AnalysisIocsResponseSchema(Schema):
     Each field is a sorted, deduplicated list of pivotable indicators
     derived from the analyzed message — empty lists (not null) when a
     category yields nothing (e.g. no body links in a headers-only
-    submission).
+    submission). ``contextType`` dice de qué mensaje del reenvío salen: el
+    mismo que decidió el veredicto.
     """
     analysisId = fields.Integer()
+    contextType = fields.String(load_default=None, allow_none=True)
     domains = fields.List(fields.String())
     urls = fields.List(fields.String())
     ips = fields.List(fields.String())
