@@ -3,13 +3,12 @@
 ``services/feedback_metrics.py`` es puro: lo usan igual el endpoint de
 métricas y este corpus. Aquí se fija la aritmética y se comprueba que el
 catálogo actual clasifica bien las muestras etiquetadas de
-``tests/fixtures/iris/``.
+``API/resources/iris/corpus/``.
 """
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -22,11 +21,12 @@ from src.modules.features.iris.services.feedback_metrics import (
     compute_feedback_metrics,
     outcome_from_rules,
 )
+from src.modules.features.iris.services.replay import CORPUS_DIRECTORY
 from src.modules.features.iris.services.rules import iris_rules
 
 pytestmark = pytest.mark.unit
 
-_CORPUS = Path(__file__).resolve().parents[1] / "fixtures" / "iris"
+_CORPUS = CORPUS_DIRECTORY
 
 
 def _outcome(label, verdict, fired=(), covered=("auth", "links")):

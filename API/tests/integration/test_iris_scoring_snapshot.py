@@ -8,7 +8,6 @@ reconstruir esa política —volver a ella— o preguntar qué habría decidido 
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -16,13 +15,13 @@ import src.modules.system.config_reading as CR
 from src.modules.features.iris.managers.analysis import IrisManager
 from src.modules.features.iris.model import IrisAnalysis
 from src.modules.features.iris.repositories import IrisAnalysisRepository
+from src.modules.features.iris.services.replay import CORPUS_DIRECTORY
 from src.modules.features.iris.services.scoring import PROFILE_STRICT, ScoringPolicy
 from src.modules.infrastructure import UnitOfWork
 
 pytestmark = pytest.mark.integration
 
-_LEGIT = (Path(__file__).resolve().parents[1] / "fixtures" / "iris" / "legit_bank_alert.eml").read_text(
-    encoding="utf-8")
+_LEGIT = (CORPUS_DIRECTORY / "legit_bank_alert.eml").read_text(encoding="utf-8")
 
 
 def _analyze(app, user_id: int, raw: str) -> int:

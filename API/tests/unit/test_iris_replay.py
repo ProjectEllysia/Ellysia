@@ -8,19 +8,18 @@ desaparecen y cómo quedan los falsos positivos y negativos de cada política.
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
 from src.modules.features.iris.managers import IrisManager
 from src.modules.features.iris.services.quality import detector_version
-from src.modules.features.iris.services.replay import ReplaySample, load_corpus, replay
+from src.modules.features.iris.services.replay import CORPUS_DIRECTORY, ReplaySample, load_corpus, replay
 from src.modules.features.iris.services.rules import iris_rules
 from src.modules.features.iris.services.scoring import PROFILE_STRICT, current_policy, policy_for_profile
 
 pytestmark = pytest.mark.unit
 
-_CORPUS = Path(__file__).resolve().parents[1] / "fixtures" / "iris"
+_CORPUS = CORPUS_DIRECTORY
 
 
 def _fake_evaluate(raw: str, policy):

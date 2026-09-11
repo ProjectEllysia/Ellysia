@@ -23,9 +23,13 @@ from flask_smorest import Blueprint as SmorestBlueprint
 from src.modules.users import (
     require_oauth_token,
     require_attributes,
+    require_role,
     AttributeType,
     get_current_user,
 )
+# Role no está entre lo que reexporta el paquete users (mismo caso que en
+# accounts/endpoints.py), así que se pide a su módulo.
+from src.modules.users.services.permissions import Role
 from src.modules.shared import handle_exceptions, limiter
 from src.modules.shared.schemas import ErrorSchema
 from src.modules.shared._exceptions import DocumentError, DocumentNotReadyError
@@ -34,7 +38,7 @@ import src.modules.system.config_reading as CR
 
 from .managers import (
     IrisFeedbackManager, IrisManager, IrisReportManager, IrisMailboxManager,
-    IrisNotificationPreferenceManager,
+    IrisNotificationPreferenceManager, IrisReplayManager,
 )
 from .exceptions import (
     IrisAnalysisNotFoundError,
@@ -83,6 +87,8 @@ from .schemas import (
     IrisFeedbackItemSchema,
     IrisFeedbackListResponseSchema,
     IrisFeedbackMetricsResponseSchema,
+    IrisReplayRequestSchema,
+    IrisReplayResponseSchema,
 )
 
 
@@ -92,6 +98,32 @@ iris_blp = SmorestBlueprint(
 )
 
 logger = logging.getLogger(__name__)
+
+
+@iris_blp.post("/admin/replay")
+@iris_blp.arguments(IrisReplayRequestSchema)
+@iris_blp.response(200, IrisReplayResponseSchema, description="Replay of the corpus under two scoring policies")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid policy or message")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Administrators only")
+@require_oauth_token
+@require_role(Role.ADMIN)
+@limiter.limit("30 per hour; 200 per day")
+@handle_exceptions(default_exception=IrisExecutionError, logger=logger)
+def run_rule_replay(data):
+    """Simulador de reglas: comparar la política vigente con una candidata sobre el corpus (solo administradores)"""
+    # Una política o un mensaje inválidos lanzan IrisInvalidInputError, que el
+    # manejador de EllysiaException de la aplicación convierte en un 400 con
+    # su descripción. No se captura aquí: una tupla (cuerpo, 400) pasaría por
+    # el schema de respuesta del 200 y perdería los campos del error.
+    report = IrisReplayManager().run(
+        data["candidate"], data.get("baseline"), data.get("messages"), data["includeCorpus"],
+    )
+    logger.info(
+        f"Replay de reglas por {get_current_user().username}: "
+        f"{len(report['samples'])} muestras, {report['changedCount']} cambian de veredicto"
+    )
+    return report
 
 
 @iris_blp.post("/analyze")
