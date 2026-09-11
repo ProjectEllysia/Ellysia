@@ -7,7 +7,7 @@ from .model import (
     MFARecoveryCode,
     MFAChallenge,
 )
-from .services import require_oauth_token, require_attributes, require_role, AttributeType
+from .services import require_oauth_token, require_attributes, require_role, AttributeType, Role
 from .endpoints import oauth_blp, users_blp, get_current_user
 from .managers import UserManager, OAuthTokenManager, MFAManager
 from src.modules.features.acheron.model import Vault
@@ -61,5 +61,6 @@ __all__ = [
     "require_attributes",
     "require_role",
     "AttributeType",
+    "Role",
     "get_current_user",
 ]
