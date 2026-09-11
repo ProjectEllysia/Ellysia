@@ -41,7 +41,8 @@ from src.modules.shared._exceptions import (
     EllysiaException,
     create_error_response
 )
-from src.modules.system     import configure_logging, config_reading, system_blp, ping_redis
+from src.modules.system     import configure_logging, config_reading, ping_redis
+from src.modules.system.endpoints import system_blp
 from src.modules.users      import (
     UserManager,
     oauth_blp,

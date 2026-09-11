@@ -25,10 +25,7 @@ from flask_smorest import Blueprint as SmorestBlueprint
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import handle_exceptions, limiter
 from src.modules.shared.schemas import ErrorSchema, SuccessMessageSchema
-from src.modules.users import require_oauth_token, require_role, get_current_user
-# Role no está entre lo que re-exporta el paquete users, y pedírselo al paquete
-# durante su propia inicialización rompe el ciclo. El submódulo sí está cargado.
-from src.modules.users.services.permissions import Role
+from src.modules.users import Role, require_oauth_token, require_role, get_current_user
 
 from .exceptions import AccountsError
 from .managers import (

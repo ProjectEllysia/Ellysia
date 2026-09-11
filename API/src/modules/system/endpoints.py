@@ -6,7 +6,6 @@ import psutil
 from flask_smorest import Blueprint as SmorestBlueprint
 from flask import jsonify, request
 
-from src.modules.users.services.permissions import Role
 from src.modules.shared._endpoints import limiter, current_actor
 from src.modules.shared._exceptions import (
     handle_exceptions,
@@ -14,7 +13,7 @@ from src.modules.shared._exceptions import (
     ValidationError,
 )
 from src.modules.shared.schemas import ErrorSchema
-from src.modules.users import require_oauth_token, require_role
+from src.modules.users import Role, require_oauth_token, require_role
 from src.modules.system.taskqueue import TaskQueue, Task, TaskStatus
 from .schemas import (
     HelloResponseSchema,

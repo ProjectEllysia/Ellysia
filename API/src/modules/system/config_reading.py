@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
-from functools import wraps
+from functools import cache, wraps
 from pathlib import Path
 from typing import Optional, TypeVar, get_origin
 
@@ -733,16 +733,43 @@ def get_smtp_environment() -> dict[str, str]:
 #
 # Derivado de ScanType en vez de repetido a mano: un escáner nuevo que
 # se registre en el enum aparece aquí solo, en vez de quedarse fuera hasta
-# que alguien se acuerde de tocar esta tupla también. Import perezoso
-# (dentro de la función, no a nivel de módulo): config_reading.py lo importa
-# casi todo el proyecto muy pronto, y no debe depender en su superficie
-# global de un modelo de un módulo de features concreto.
-def _themis_scanner_values() -> tuple:
+# que alguien se acuerde de tocar esta tupla también.
+@cache
+def _themis_scanner_values() -> tuple[str, ...]:
+    """Devuelve los valores de ``ScanType``: los escáneres de Themis con bloque de config.
+
+    El import de ``ScanType`` ocurre en la primera llamada, nunca al cargar este
+    módulo. Cargar ``themis/model.py`` ejecuta antes ``features/themis/__init__.py``,
+    que arrastra managers, ``accounts`` y ``users``; y casi todo el proyecto importa
+    ``config_reading`` muy pronto, así que hacerlo al cargar cierra un ciclo de imports.
+
+    Returns:
+        tuple[str, ...]: Los valores del enum (``"nmap"``, ``"nikto"``, ``"lybra"``,
+            ``"nuclei"``), en el orden en que se declaran.
+    """
     from src.modules.features.themis.model import ScanType
     return tuple(scan_type.value for scan_type in ScanType)
 
 
-THEMIS_SCANNERS = _themis_scanner_values()
+def __getattr__(name: str):
+    """Resuelve ``CR.THEMIS_SCANNERS`` al pedirlo, en vez de al cargar el módulo.
+
+    Mantiene el nombre público de siempre sin pagar el import de Themis en la
+    carga (ver ``_themis_scanner_values``). Dentro de este fichero se llama a
+    ``_themis_scanner_values()`` directamente: un nombre suelto no pasa por aquí.
+
+    Args:
+        name: Atributo del módulo que no se encontró por la vía normal.
+
+    Returns:
+        tuple[str, ...]: Los escáneres de Themis, si ``name`` es ``"THEMIS_SCANNERS"``.
+
+    Raises:
+        AttributeError: Para cualquier otro nombre.
+    """
+    if name == "THEMIS_SCANNERS":
+        return _themis_scanner_values()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 @config_block("features.themis")
@@ -1221,7 +1248,7 @@ def nuclei_config() -> NucleiConfig:
 def get_prompts_config() -> dict:
     return {
         scanner: _cfg(f"features.themis.scanners.{scanner}.prompts", {})
-        for scanner in THEMIS_SCANNERS
+        for scanner in _themis_scanner_values()
     }
 
 

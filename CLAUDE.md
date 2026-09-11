@@ -1,7 +1,8 @@
 # La Guía del Proyecto — Ellysia
 
 Documento maestro del repositorio. Es la **única** fuente de verdad operativa y arquitectónica:
-`AGENTS.md` apunta aquí, y `README.md` cubre solo la superficie pública (referencia de endpoints).
+`AGENTS.md` apunta aquí, `README.md` cubre solo la superficie pública (referencia de endpoints) y
+`CONVENCIONES.md` fija dónde y cómo se crea cada pieza de código.
 Si algo de aquí contradice a un documento de `plans/`, manda el código; `plans/` describe
 intenciones y auditorías fechadas, no el estado actual.
 
@@ -147,6 +148,9 @@ schemas.py        # schemas Marshmallow — las claves JSON son camelCase
 services/         # helpers internos del módulo (escáneres, parsers, scheduling, informes)
 ```
 
+Qué entidad le toca a cada pieza, qué puede importar a qué y dónde van los helpers compartidos:
+[`CONVENCIONES.md`](CONVENCIONES.md) §3–§6.
+
 Cuando `managers.py` se hace grande pasa a ser **paquete** `managers/` con un `__init__.py` que
 reexporta la superficie pública (así ningún import externo cambia). Estado actual:
 
@@ -193,18 +197,21 @@ por cadenas de `if/elif`.
 ### TaskQueue (RQ + Redis) — `system/taskqueue/`
 
 Sustituye a la cola en proceso legada. Los jobs persisten en Redis (sobreviven a reinicios de la
-API) y corren en **procesos worker aislados del SO**, no en hilos.
+API) y corren en un **proceso worker separado de la API**; dentro de él, cada job ocupa uno de
+los `max_workers` hilos (`SimpleWorker` de RQ, sin `fork` — `worker.py` explica por qué).
 
 Ficheros clave: `task.py` (dataclass `Task` + enum `TaskStatus`), `queue.py` (singleton `TaskQueue`
 con backend RQ+Redis), `worker.py` (entrada del worker), `tracking.py` (`TaskTrackingMixin`).
 
 - Enviar: `TaskQueue.get_instance().submit(func, name=, category=, external_id=, args=, timeout=)`.
 - Los puntos de entrada son `@staticmethod` en el manager de cada módulo (p. ej.
-  `NmapScanManager.execute_nmap_scan`) — picklables por referencia, sin estado ligado; instancian
-  un manager fresco dentro del worker (patrón `execute_*` como costura → cuerpo en `_run_*`).
+  `NmapScanManager.execute_nmap_scan`) — picklables por referencia, sin estado ligado; delegan en
+  el cuerpo del job (patrón `execute_*` como costura → cuerpo en la función de módulo `_run_*`).
+  Cuándo encolar por la outbox (`build_dispatch` + `OutboxDispatcher`) y cuándo con `submit()`
+  directo, y la receta completa: [`CONVENCIONES.md`](CONVENCIONES.md) §7.
 - **Categorías**: `themis.scan`, `themis.report`, `themis.traceroute`, `aegis.generate`,
-  `aegis.campaign`, `iris.analyze`, `iris.report`, `iris.ingest`, `iris.notify`, `hygeia.notify`
-  (+ `default`). Cada módulo las da de alta en su `__init__.py` con `QueueRegistry.register(...)`;
+  `aegis.campaign`, `iris.analyze`, `iris.ai_summary`, `iris.report`, `iris.ingest`,
+  `iris.notify`, `hygeia.notify` (+ `default`). Cada módulo las da de alta en su `__init__.py` con `QueueRegistry.register(...)`;
   los workers escuchan en colas por categoría.
 - **`external_id`**: el prefijo lo declara el manager en `EXTERNAL_ID_PREFIX` (`scan:`,
   `themis-doc:`, `themis-traceroute:`, `aegis-doc:`, `aegis-campaign:`, `iris-analysis:`,
@@ -353,18 +360,12 @@ que actualizarla en tres sitios — la ruta del `@config_block` (o la llamada a 
 
 ---
 
-## Convenciones de nombres
+## Convenciones de código
 
-- **Palabras completas**, nunca abreviaturas ni letras sueltas: `message` no `msg`, `count` no
-  `cnt`, `manager` no `mgr`, `document` no `doc`, `task_queue` no `tq`.
-  Excepciones autorizadas: `repo`, `config`, `uow`, `pk`, `CR`, `e` en `except ... as e`, y
-  `_`, `i`, `j`, `n`, `x`, `y`, `ip` como índices o descartes.
-- **El nombre aclara el tipo.** `critical_threshold` no `critical` (`critical` se lee como
-  booleano; `critical_threshold` dice que es un entero).
-- **Booleanos con `is`/`are`/`was`/`did`**: `is_finished`, `was_cancelled`, `did_succeed`,
-  `was_written`, `is_verified`.
-- **Y al revés**: lo que no es booleano no debe sonar a booleano. `active_scans` (una lista) no
-  `active`; `matched_phrases` no `found`; `empty_payload` no `empty`.
+Dónde va cada pieza, qué entidad darle (repositorio, manager, servicio, scheduler, constante o
+clave de config), qué puede importar a qué y cómo se nombra todo está en
+**[`CONVENCIONES.md`](CONVENCIONES.md)**. Eso incluye la regla de nombres: palabras completas,
+funciones con verbo y booleanos con `is_`/`has_`… No se duplica aquí.
 
 ---
 
