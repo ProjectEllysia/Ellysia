@@ -16,6 +16,8 @@ dataset, vive aquí; si necesitan una utilidad de texto/dominio, vive en
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from functools import lru_cache
 from typing import Any
@@ -464,6 +466,44 @@ def _set_of(key: str) -> frozenset[str]:
 
 def _tuple_of(key: str) -> tuple[str, ...]:
     return _cached_tuple(CR.config_version(), key)
+
+
+#: Datasets que viven solo en la configuración (sin default en ``_DEFAULTS``)
+#: y que también cambian el resultado de un análisis.
+_FINGERPRINT_EXTRA_KEYS = ("trusted_authserv_ids",)
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def _datasets_fingerprint(config_version: tuple) -> str:
+    """Huella de los datasets efectivos para una versión de configuración.
+
+    Args:
+        config_version: ``CR.config_version()``; forma parte de la clave de
+            caché por el mismo motivo que en el resto de este módulo.
+
+    Returns:
+        str: ``iris-data:<12 hexadecimales>``.
+    """
+    effective = {key: _data(key) for key in sorted(_DEFAULTS)}
+    for key in _FINGERPRINT_EXTRA_KEYS:
+        effective.setdefault(key, CR.get_iris_data(key))
+    material = json.dumps(effective, sort_keys=True, ensure_ascii=False, default=list)
+    return "iris-data:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+
+
+def datasets_fingerprint() -> str:
+    """Huella de los datasets de detección con que se evalúa ahora mismo.
+
+    Marcas, proveedores, keywords, TLDs… cambian lo que deciden las reglas tanto
+    como sus pesos. Se calcula sobre los valores **efectivos** (configuración, o
+    el default de este módulo si falta), así que cambia en cuanto cambia lo que
+    ven las reglas, y se cachea por versión de configuración como los propios
+    datasets.
+
+    Returns:
+        str: ``iris-data:<12 hexadecimales>``.
+    """
+    return _datasets_fingerprint(CR.config_version())
 
 
 # --- Accessors públicos (uno por dataset) ------------------------------------

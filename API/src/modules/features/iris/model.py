@@ -72,6 +72,15 @@ class IrisAnalysis(Base):
                  contenido que mirar. NULL en análisis antiguos.
         uncertainty_reasons: Frases legibles que explican por qué la
                  confianza no es "high"; lista vacía o NULL si no hay motivos.
+        scoring_snapshot: Política de puntuación con la que se decidió:
+                 perfil, umbrales, techo, suelos por familia, pesos
+                 sobreescritos, huella de datasets, versión de la aplicación y
+                 catálogo (ver ``services/scoring.ScoringPolicy.snapshot``).
+                 Permite reconstruir esa política y responder qué habría
+                 decidido Iris con otra. NULL en análisis anteriores.
+        scoring_version: Marca estable de esa política
+                 (``iris-scoring:<hash>``); dos análisis con la misma marca se
+                 decidieron con las mismas reglas del juego.
         winning_context: Qué mensaje produjo el veredicto: "inner" (el
                  original desenvuelto de un reenvío, o el único mensaje si no
                  lo era) o "wrapper" (el envoltorio del reenvío, cuando es más
@@ -145,6 +154,8 @@ class IrisAnalysis(Base):
     confidence = Column(String(16), nullable=True)
     coverage = Column(JSONB, nullable=True)
     uncertainty_reasons = Column(JSONB, nullable=True)
+    scoring_snapshot = Column(JSONB, nullable=True)
+    scoring_version = Column(String(64), nullable=True)
     winning_context = Column(String(16), nullable=True)
     winning_reason = Column(Text, nullable=True)
     secondary_context = Column(JSONB, nullable=True)
