@@ -15,6 +15,7 @@ from typing import Callable, Optional
 from unittest import mock
 
 import pytest
+from _iris_msg_fixtures import build_msg
 
 import src.modules.system.config_reading as CR
 from src.modules.features.iris.managers import analysis as analysis_mod
@@ -88,6 +89,31 @@ def _statuses(batch) -> list:
     return [(item["filename"], item["status"]) for item in batch["items"]]
 
 
+# ---------------------------------------------------- .msg de Outlook
+
+def test_outlook_msg_files_are_converted_and_analysed(client, app, analyst):
+    """Un .msg entra en el lote como un .eml más, suelto o dentro de un ZIP, y
+    lo que se guarda es el .eml convertido: el reanálisis no vuelve a pasar por
+    el conversor. Uno dañado se rechaza con su motivo sin tumbar el resto."""
+    user, headers = analyst
+    loose = build_msg(subject="Aviso", sender_email="alertas@evil.example", body="Entre ya.",
+                      message_id="<aviso@evil.example>")
+    zipped = build_msg(subject="Otro", sender_email="otro@evil.example", body="Hola.")
+    broken = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 100
+
+    batch = _upload(client, headers, [("aviso.msg", loose), ("roto.msg", broken),
+                                      ("buzon.zip", _zip({"dentro.MSG": zipped}))]).get_json()
+
+    assert _statuses(batch) == [("aviso.msg", "created"), ("roto.msg", "rejected"),
+                                ("buzon.zip/dentro.MSG", "created")]
+    assert "dañado" in batch["items"][1]["error"]
+    with app.app_context():
+        stored = build_repository(IrisAnalysisRepository).get_by_id(batch["items"][0]["analysisId"])
+        assert stored.user_id == user.id
+        assert stored.raw_headers.startswith("From: alertas@evil.example")
+        assert "X-Iris-Source-Format: outlook-msg" in stored.raw_headers
+
+
 # -------------------------------------------------------------- resumen
 
 def test_a_batch_returns_a_summary_and_a_link_per_message(client, app, analyst):
@@ -100,7 +126,7 @@ def test_a_batch_returns_a_summary_and_a_link_per_message(client, app, analyst):
     batch = response.get_json()
     assert batch["counts"] == {"created": 2, "duplicate": 0, "rejected": 1, "failed": 0}
     assert _statuses(batch) == [("uno.eml", "created"), ("dos.eml", "created"), ("notas.txt", "rejected")]
-    assert batch["items"][2]["error"] == "No es un fichero .eml."
+    assert batch["items"][2]["error"] == "No es un fichero .eml ni .msg."
     with app.app_context():
         repo = build_repository(IrisAnalysisRepository)
         created = [repo.get_by_id(item["analysisId"]) for item in batch["items"][:2]]

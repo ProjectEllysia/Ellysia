@@ -1,10 +1,15 @@
 """
 Análisis por lotes: qué entra en un lote y qué se queda fuera.
 
-Un lote llega como varios ``.eml`` o como un ZIP que los contiene. Este módulo
-lo convierte en una lista de entradas, una por mensaje, y decide las que no se
-pueden analizar —no son ``.eml``, pasan del tamaño máximo, están cifradas o
-son un ZIP dentro de otro— sin que eso tumbe el resto del lote.
+Un lote llega como varios ``.eml`` o ``.msg`` de Outlook, o como un ZIP que
+los contiene. Este módulo lo convierte en una lista de entradas, una por
+mensaje, y decide las que no se pueden analizar —no son un correo, pasan del
+tamaño máximo, están cifradas, son un ZIP dentro de otro o un ``.msg`` dañado—
+sin que eso tumbe el resto del lote.
+
+Un ``.msg`` se convierte aquí a ``.eml`` (``msg_converter``), así que lo que
+sale de este módulo son siempre mensajes RFC 5322 y el resto de Iris no
+distingue de qué formato vino cada uno.
 
 Los límites de lote (cuántos mensajes y cuántos bytes en total) sí lo tumban
 entero, y antes de crear nada: un lote que no cabe se rechaza con un motivo
@@ -26,8 +31,12 @@ import zipfile
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
+from .msg_converter import MsgConversionError, convert_msg_to_eml
+
 _EML_SUFFIX = ".eml"
+_MSG_SUFFIX = ".msg"
 _ZIP_SUFFIX = ".zip"
+_NOT_A_MESSAGE = "No es un fichero .eml ni .msg."
 
 
 class BatchLimitError(ValueError):
@@ -48,9 +57,38 @@ class BatchEntry:
     rejection: Optional[str] = None
 
 
-def _is_eml(filename: str) -> bool:
-    """Si un nombre de fichero es un ``.eml`` (sin distinguir mayúsculas)."""
-    return filename.lower().endswith(_EML_SUFFIX)
+def _is_message_file(filename: str) -> bool:
+    """Si un nombre de fichero es un ``.eml`` o un ``.msg`` (sin distinguir mayúsculas)."""
+    return filename.lower().endswith((_EML_SUFFIX, _MSG_SUFFIX))
+
+
+def _message_entry(name: str, data: bytes, max_message_bytes: int) -> BatchEntry:
+    """Entrada de un mensaje, suelto o sacado de un ZIP.
+
+    Un ``.eml`` pasa tal cual; un ``.msg`` se convierte a ``.eml``. El tope se
+    aplica al fichero recibido y, en un ``.msg``, también al resultado: la
+    conversión pasa los adjuntos a base64, que ocupa un tercio más.
+
+    Args:
+        name: Nombre del fichero (dentro de un ZIP, ``zip/ruta``).
+        data: Sus bytes.
+        max_message_bytes: Tamaño máximo de un mensaje.
+
+    Returns:
+        BatchEntry: Con el ``.eml`` en ``content``, o con el motivo de rechazo
+            si pasa del tamaño o es un ``.msg`` que no se puede convertir.
+    """
+    too_big = f"Supera el tamaño máximo ({max_message_bytes} bytes)."
+    if len(data) > max_message_bytes:
+        return BatchEntry(name, rejection=too_big)
+    if name.lower().endswith(_MSG_SUFFIX):
+        try:
+            data = convert_msg_to_eml(data).encode("utf-8")
+        except MsgConversionError as e:
+            return BatchEntry(name, rejection=str(e))
+        if len(data) > max_message_bytes:
+            return BatchEntry(name, rejection=f"Convertido a .eml, supera el tamaño máximo ({max_message_bytes} bytes).")
+    return BatchEntry(name, content=data)
 
 
 def _expand_zip(filename: str, data: bytes, max_message_bytes: int) -> List[BatchEntry]:
@@ -80,17 +118,13 @@ def _expand_zip(filename: str, data: bytes, max_message_bytes: int) -> List[Batc
                 entries.append(BatchEntry(name, rejection="Está cifrado dentro del ZIP."))
             elif info.filename.lower().endswith(_ZIP_SUFFIX):
                 entries.append(BatchEntry(name, rejection="No se admiten ZIP dentro de un ZIP."))
-            elif not _is_eml(info.filename):
-                entries.append(BatchEntry(name, rejection="No es un fichero .eml."))
+            elif not _is_message_file(info.filename):
+                entries.append(BatchEntry(name, rejection=_NOT_A_MESSAGE))
             elif info.file_size > max_message_bytes:
                 entries.append(BatchEntry(name, rejection=f"Supera el tamaño máximo ({max_message_bytes} bytes)."))
             else:
                 with archive.open(info) as handle:
-                    content = handle.read(max_message_bytes + 1)
-                if len(content) > max_message_bytes:
-                    entries.append(BatchEntry(name, rejection=f"Supera el tamaño máximo ({max_message_bytes} bytes)."))
-                else:
-                    entries.append(BatchEntry(name, content=content))
+                    entries.append(_message_entry(name, handle.read(max_message_bytes + 1), max_message_bytes))
     return entries
 
 
@@ -99,8 +133,8 @@ def expand_uploads(uploads: Sequence[Tuple[str, bytes]], *, max_items: int,
     """Convierte los ficheros subidos en las entradas del lote.
 
     Args:
-        uploads: Pares ``(nombre, bytes)`` tal como llegaron: ``.eml`` sueltos
-            y/o ZIP.
+        uploads: Pares ``(nombre, bytes)`` tal como llegaron: ``.eml`` y
+            ``.msg`` sueltos y/o ZIP.
         max_items: Mensajes como máximo en el lote, contando los rechazados.
         max_message_bytes: Tamaño máximo de un mensaje.
         max_total_bytes: Suma máxima de los mensajes que se van a analizar.
@@ -115,18 +149,16 @@ def expand_uploads(uploads: Sequence[Tuple[str, bytes]], *, max_items: int,
             ``max_total_bytes``.
     """
     if not uploads:
-        raise BatchLimitError("El lote está vacío: adjunta ficheros .eml o un ZIP que los contenga.")
+        raise BatchLimitError("El lote está vacío: adjunta ficheros .eml o .msg, o un ZIP que los contenga.")
     entries: List[BatchEntry] = []
     for filename, data in uploads:
         name = filename or "sin-nombre"
         if name.lower().endswith(_ZIP_SUFFIX):
             entries.extend(_expand_zip(name, data, max_message_bytes))
-        elif not _is_eml(name):
-            entries.append(BatchEntry(name, rejection="No es un fichero .eml."))
-        elif len(data) > max_message_bytes:
-            entries.append(BatchEntry(name, rejection=f"Supera el tamaño máximo ({max_message_bytes} bytes)."))
+        elif not _is_message_file(name):
+            entries.append(BatchEntry(name, rejection=_NOT_A_MESSAGE))
         else:
-            entries.append(BatchEntry(name, content=data))
+            entries.append(_message_entry(name, data, max_message_bytes))
         if len(entries) > max_items:
             raise BatchLimitError(f"Un lote admite como mucho {max_items} mensajes.")
 
