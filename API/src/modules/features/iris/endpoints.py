@@ -37,6 +37,7 @@ import src.modules.system.config_reading as CR
 from .managers import (
     IrisFeedbackManager, IrisManager, IrisReportManager, IrisMailboxManager,
     IrisNotificationPreferenceManager, IrisReplayManager, IrisTriageManager, IrisTrustPolicyManager,
+    IrisCaseManager,
 )
 from .exceptions import (
     IrisAnalysisNotFoundError,
@@ -44,6 +45,7 @@ from .exceptions import (
     IrisInvalidInputError,
     IrisMailboxConnectionNotFoundError,
     IrisMailboxOAuthStateError,
+    IrisCaseNotFoundError,
     IrisSavedViewNotFoundError,
     IrisTrustedSenderNotFoundError,
 )
@@ -100,6 +102,14 @@ from .schemas import (
     IrisSavedViewListResponseSchema,
     IrisSavedViewRequestSchema,
     IrisTagListResponseSchema,
+    IrisCaseCreateRequestSchema,
+    IrisCaseDetailSchema,
+    IrisCaseLinkRequestSchema,
+    IrisCaseListResponseSchema,
+    IrisCaseNoteRequestSchema,
+    IrisCaseStatusRequestSchema,
+    IrisCasesQuerySchema,
+    IrisCaseUpdateRequestSchema,
 )
 
 
@@ -367,6 +377,145 @@ def set_analysis_tags(data, analysis_id: int):
     user = get_current_user()
     tags = IrisTriageManager().set_tags(analysis_id, user.id, data["tags"])
     return {"analysisId": analysis_id, "tags": tags}
+
+
+# =============================================================================
+# Casos de analista
+# =============================================================================
+
+@iris_blp.post("/cases")
+@iris_blp.arguments(IrisCaseCreateRequestSchema)
+@iris_blp.response(201, IrisCaseDetailSchema, description="Case opened")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid title, tags or too many analyses")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisExecutionError, logger=logger)
+def create_case(data):
+    """Abrir un caso de analista, opcionalmente con análisis ya vinculados"""
+    user = get_current_user()
+    case = IrisCaseManager().create_case(user.id, data["title"], data["priority"],
+                                         data["analysisIds"], data["tags"])
+    logger.info(f"Caso {case['caseId']} abierto por {user.username}")
+    return case
+
+
+@iris_blp.get("/cases")
+@iris_blp.arguments(IrisCasesQuerySchema, location="query")
+@iris_blp.response(200, IrisCaseListResponseSchema, description="Analyst cases and counts by status")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(logger=logger)
+def list_cases(args: dict):
+    """Casos del usuario, con cuántos tiene en cada estado"""
+    user = get_current_user()
+    return IrisCaseManager().list_cases(user.id, args["status"], args["priority"], args["assignedToMe"])
+
+
+@iris_blp.get("/cases/<int:case_id>")
+@iris_blp.response(200, IrisCaseDetailSchema, description="Case with its analyses and timeline")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Case not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisCaseNotFoundError, logger=logger)
+def get_case(case_id: int):
+    """Un caso con sus análisis y su timeline"""
+    return IrisCaseManager().get_case(case_id, get_current_user().id)
+
+
+@iris_blp.patch("/cases/<int:case_id>")
+@iris_blp.arguments(IrisCaseUpdateRequestSchema)
+@iris_blp.response(200, IrisCaseDetailSchema, description="Case updated")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid value or assignee")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Case not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisCaseNotFoundError, logger=logger)
+def update_case(data, case_id: int):
+    """Cambiar título, prioridad, etiquetas o asignación de un caso"""
+    # Solo se pasan los campos presentes: assigneeId a null (quitar la
+    # asignación) no es lo mismo que no enviarlo.
+    fields_by_key = {"title": "title", "priority": "priority", "tags": "tags", "assigneeId": "assignee_id"}
+    changes = {argument: data[key] for key, argument in fields_by_key.items() if key in data}
+    return IrisCaseManager().update_case(case_id, get_current_user().id, **changes)
+
+
+@iris_blp.post("/cases/<int:case_id>/status")
+@iris_blp.arguments(IrisCaseStatusRequestSchema)
+@iris_blp.response(200, IrisCaseDetailSchema, description="Case moved to a new status")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Transition not allowed or missing reason")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Case not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisCaseNotFoundError, logger=logger)
+def change_case_status(data, case_id: int):
+    """Mover un caso por su ciclo de vida; cerrarlo exige una razón"""
+    user = get_current_user()
+    case = IrisCaseManager().change_status(case_id, user.id, data["status"], data.get("reason"))
+    logger.info(f"Caso {case_id} pasa a {data['status']} por {user.username}")
+    return case
+
+
+@iris_blp.post("/cases/<int:case_id>/notes")
+@iris_blp.arguments(IrisCaseNoteRequestSchema)
+@iris_blp.response(201, IrisCaseDetailSchema, description="Note added")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Empty note")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Case not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisCaseNotFoundError, logger=logger)
+def add_case_note(data, case_id: int):
+    """Añadir una nota a la timeline de un caso"""
+    return IrisCaseManager().add_note(case_id, get_current_user().id, data["note"])
+
+
+@iris_blp.post("/cases/<int:case_id>/analyses")
+@iris_blp.arguments(IrisCaseLinkRequestSchema)
+@iris_blp.response(201, IrisCaseDetailSchema, description="Analysis linked")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Analysis already in the case")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Case or analysis not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisCaseNotFoundError, logger=logger)
+def link_case_analysis(data, case_id: int):
+    """Vincular un análisis a un caso (el análisis no cambia)"""
+    return IrisCaseManager().link_analysis(case_id, get_current_user().id, data["analysisId"])
+
+
+@iris_blp.delete("/cases/<int:case_id>/analyses/<int:analysis_id>")
+@iris_blp.response(200, IrisCaseDetailSchema, description="Analysis unlinked")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Analysis not in the case")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Case not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisCaseNotFoundError, logger=logger)
+def unlink_case_analysis(case_id: int, analysis_id: int):
+    """Desvincular un análisis de un caso (el análisis no se borra)"""
+    return IrisCaseManager().unlink_analysis(case_id, get_current_user().id, analysis_id)
 
 
 @iris_blp.get("/retention-policy")

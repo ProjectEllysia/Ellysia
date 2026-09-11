@@ -139,6 +139,8 @@ class IrisAnalysis(Base):
                  Nunca modifican el veredicto de esta fila.
         tags: Etiquetas del analista (``IrisAnalysisTag``), por nombre.
                  Tampoco modifican el análisis.
+        case_links: Casos de analista en los que está este análisis
+                 (``IrisCaseAnalysis``); borrar el análisis lo saca de ellos.
         indicators: Índice de IOCs del contexto ganador (``IrisIndicator``).
                  Se rellena al terminar el análisis y sobrevive a la purga
                  del raw por retención.
@@ -217,6 +219,12 @@ class IrisAnalysis(Base):
     indicators = relationship(
         "IrisIndicator", back_populates="analysis",
         cascade="all, delete-orphan",
+    )
+    # "delete" y no "delete-orphan": el vínculo tiene dos padres (el caso y
+    # el análisis) y el que lo quita de un caso es el caso, no el análisis.
+    case_links = relationship(
+        "IrisCaseAnalysis", back_populates="analysis",
+        cascade="all, delete",
     )
 
     __table_args__ = (
@@ -848,4 +856,159 @@ class IrisIndicator(Base):
     __table_args__ = (
         Index("ix_iris_indicator_analysis_id", "analysis_id"),
         Index("ix_iris_indicator_value", "value"),
+    )
+
+
+class CaseStatus(StrEnum):
+    """Estado de un caso de analista (``IrisCase.status``).
+
+    Las transiciones válidas las fija ``services/cases.ALLOWED_TRANSITIONS``.
+
+    Attributes:
+        NEW: Recién abierto, nadie lo ha mirado.
+        TRIAGE: Alguien lo está investigando.
+        CONTAINED: La amenaza está controlada, pero el caso sigue abierto.
+        RESOLVED: Cerrado; era un incidente real y se trató.
+        FALSE_POSITIVE: Cerrado; no era una amenaza.
+    """
+    NEW = "new"
+    TRIAGE = "triage"
+    CONTAINED = "contained"
+    RESOLVED = "resolved"
+    FALSE_POSITIVE = "false_positive"
+
+
+class CasePriority(StrEnum):
+    """Prioridad de un caso de analista (``IrisCase.priority``).
+
+    Attributes:
+        LOW: Puede esperar.
+        MEDIUM: Por defecto.
+        HIGH: Pasa por delante de la cola.
+        CRITICAL: Incidente en curso.
+    """
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class IrisCase(Base):
+    """Caso de analista: la decisión humana sobre uno o varios análisis.
+
+    Los análisis que agrupa (``IrisCaseAnalysis``) no cambian: el caso es la
+    capa de decisión encima. Todo lo que le pasa queda en su timeline
+    (``IrisCaseEvent``).
+
+    Es de un usuario, igual que sus análisis: una organización comparte plan y
+    factura, no datos (ver ``Organization``), así que ``assignee_id`` solo puede
+    ser el propio dueño, el único que ve esos análisis.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño; ``ondelete="CASCADE"``.
+        title: Título visible (hasta 120 caracteres).
+        status: ``CaseStatus``; empieza en ``new``.
+        priority: ``CasePriority``; por defecto ``medium``.
+        assignee_id: FK al ``User`` asignado; NULL si no está asignado.
+                 ``ondelete="SET NULL"``.
+        tags: Etiquetas normalizadas (ver ``services/tags.py``).
+        resolution_reason: Por qué se cerró; NULL mientras está abierto.
+        created_at: Cuándo se abrió.
+        updated_at: Último cambio (también las notas y los vínculos).
+        closed_at: Cuándo se cerró; NULL si está abierto (o se reabrió).
+        user / assignee: Relaciones a los ``User``.
+        links: Análisis vinculados, en el orden en que se añadieron.
+        events: Timeline, del evento más antiguo al más reciente.
+    """
+    __tablename__ = "IrisCase"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(120), nullable=False)
+    status = Column(String(20), nullable=False, default=CaseStatus.NEW.value)
+    priority = Column(String(16), nullable=False, default=CasePriority.MEDIUM.value)
+    assignee_id = Column(Integer, ForeignKey("User.id", ondelete="SET NULL"), nullable=True)
+    tags = Column(JSONB, nullable=False, default=list)
+    resolution_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    closed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+    assignee = relationship("User", foreign_keys=[assignee_id])
+    links = relationship(
+        "IrisCaseAnalysis", back_populates="case",
+        order_by="IrisCaseAnalysis.id",
+        cascade="all, delete-orphan",
+    )
+    events = relationship(
+        "IrisCaseEvent", back_populates="case",
+        order_by="IrisCaseEvent.id",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_iris_case_user_id", "user_id"),
+        Index("ix_iris_case_status", "status"),
+    )
+
+
+class IrisCaseAnalysis(Base):
+    """Vínculo entre un caso y uno de sus análisis.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        case_id: FK al ``IrisCase``; ``ondelete="CASCADE"``.
+        analysis_id: FK al ``IrisAnalysis``; ``ondelete="CASCADE"``.
+        added_at: Cuándo se vinculó.
+        case / analysis: Relaciones inversas.
+    """
+    __tablename__ = "IrisCaseAnalysis"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("IrisCase.id", ondelete="CASCADE"), nullable=False)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"), nullable=False)
+    added_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    case = relationship("IrisCase", back_populates="links")
+    analysis = relationship("IrisAnalysis", back_populates="case_links")
+
+    __table_args__ = (
+        UniqueConstraint("case_id", "analysis_id", name="uq_iris_case_analysis_case_analysis"),
+        Index("ix_iris_case_analysis_analysis_id", "analysis_id"),
+    )
+
+
+class IrisCaseEvent(Base):
+    """Una entrada de la timeline de un caso: un cambio o una nota.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        case_id: FK al ``IrisCase``; ``ondelete="CASCADE"``.
+        actor_id: FK al ``User`` que hizo el cambio; ``ondelete="SET NULL"``.
+        kind: ``created``, ``status_changed``, ``priority_changed``,
+                 ``assigned``, ``title_changed``, ``tags_changed``, ``note``,
+                 ``analysis_linked`` o ``analysis_unlinked``.
+        detail: Datos del cambio (``from``/``to``, ``reason``, ``analysisId``…);
+                 NULL en las notas.
+        note: Texto de una nota; NULL en los demás eventos.
+        created_at: Cuándo pasó.
+        case / actor: Relaciones.
+    """
+    __tablename__ = "IrisCaseEvent"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("IrisCase.id", ondelete="CASCADE"), nullable=False)
+    actor_id = Column(Integer, ForeignKey("User.id", ondelete="SET NULL"), nullable=True)
+    kind = Column(String(24), nullable=False)
+    detail = Column(JSONB, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    case = relationship("IrisCase", back_populates="events")
+    actor = relationship("User")
+
+    __table_args__ = (
+        Index("ix_iris_case_event_case_id", "case_id"),
     )

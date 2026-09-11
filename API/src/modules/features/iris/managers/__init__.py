@@ -20,6 +20,8 @@ Managers del módulo Iris (análisis de correo).
   usuario (remitentes y dominios), con motivo, caducidad y revocación.
 - ``IrisTriageManager`` (``triage.py``): vistas guardadas y etiquetas del
   historial de triaje.
+- ``IrisCaseManager`` (``cases.py``): casos de analista con estado,
+  prioridad, asignación, notas y timeline sobre uno o varios análisis.
 
 Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el
@@ -42,11 +44,13 @@ from .feedback import IrisFeedbackManager
 from .replay import IrisReplayManager
 from .trust import IrisTrustPolicyManager
 from .triage import IrisTriageManager
+from .cases import IrisCaseManager
 
 __all__ = [
     "IrisManager",
     "IrisTrustPolicyManager",
     "IrisTriageManager",
+    "IrisCaseManager",
     "IrisFeedbackManager",
     "IrisReplayManager",
     "IrisReportManager",

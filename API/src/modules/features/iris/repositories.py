@@ -21,6 +21,7 @@ from .model import (
     IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisNotificationPreference,
     IrisRawMessage, IrisRuleResult, IrisDocument, IrisTrustedSender,
     IrisAnalysisTag, IrisIndicator, IrisSavedView,
+    IrisCase, IrisCaseAnalysis, IrisCaseEvent,
 )
 
 
@@ -849,6 +850,88 @@ class IrisIndicatorRepository(BaseRepository[IrisIndicator]):
     """
 
     _MODEL = IrisIndicator
+
+
+class IrisCaseRepository(BaseRepository[IrisCase]):
+    """Acceso a los casos de analista (``IrisCase``)."""
+
+    _MODEL = IrisCase
+
+    def get_by_user_filtered(self, user_id: int, *, status: Optional[str] = None,
+                             priority: Optional[str] = None,
+                             assignee_id: Optional[int] = None) -> List[IrisCase]:
+        """Casos de un usuario, del modificado más recientemente al más antiguo.
+
+        Args:
+            user_id: Dueño de los casos.
+            status: Solo los de este estado. Por defecto ``None``: todos.
+            priority: Solo los de esta prioridad. Por defecto ``None``: todas.
+            assignee_id: Solo los asignados a este usuario. Por defecto
+                ``None``: sin filtro.
+
+        Returns:
+            List[IrisCase]: Los casos, con sus vínculos y su asignado cargados.
+        """
+        query = (
+            self._session.query(IrisCase)
+            .options(selectinload(IrisCase.links), joinedload(IrisCase.assignee))
+            .filter(IrisCase.user_id == user_id)
+        )
+        if status:
+            query = query.filter(IrisCase.status == status)
+        if priority:
+            query = query.filter(IrisCase.priority == priority)
+        if assignee_id is not None:
+            query = query.filter(IrisCase.assignee_id == assignee_id)
+        return query.order_by(IrisCase.updated_at.desc(), IrisCase.id.desc()).all()
+
+    def count_by_status_for_user(self, user_id: int) -> dict:
+        """Cuántos casos tiene un usuario en cada estado.
+
+        Args:
+            user_id: Dueño de los casos.
+
+        Returns:
+            dict: ``{estado: casos}``, solo con los estados que tienen alguno.
+        """
+        rows = (
+            self._session.query(IrisCase.status, func.count(IrisCase.id))
+            .filter(IrisCase.user_id == user_id)
+            .group_by(IrisCase.status)
+            .all()
+        )
+        return {status: total for status, total in rows}
+
+
+class IrisCaseAnalysisRepository(BaseRepository[IrisCaseAnalysis]):
+    """Acceso a los vínculos entre casos y análisis (``IrisCaseAnalysis``)."""
+
+    _MODEL = IrisCaseAnalysis
+
+    def get_link(self, case_id: int, analysis_id: int) -> Optional[IrisCaseAnalysis]:
+        """El vínculo entre un caso y un análisis, si existe.
+
+        Args:
+            case_id: Primary key del caso.
+            analysis_id: Primary key del análisis.
+
+        Returns:
+            Optional[IrisCaseAnalysis]: El vínculo, o ``None``.
+        """
+        return (
+            self._session.query(IrisCaseAnalysis)
+            .filter(IrisCaseAnalysis.case_id == case_id, IrisCaseAnalysis.analysis_id == analysis_id)
+            .first()
+        )
+
+
+class IrisCaseEventRepository(BaseRepository[IrisCaseEvent]):
+    """Acceso a la timeline de los casos (``IrisCaseEvent``).
+
+    Los eventos se leen a través de ``IrisCase.events``; aquí solo se guardan.
+    """
+
+    _MODEL = IrisCaseEvent
 
 
 class IrisReportRepository(DocumentRepository[IrisDocument]):

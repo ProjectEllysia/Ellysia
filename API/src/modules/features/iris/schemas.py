@@ -11,7 +11,7 @@ import src.modules.system.config_reading as CR
 from src.modules.shared import UTCDateTime
 
 from .services.feedback_metrics import FEEDBACK_LABELS
-from .model import TrustKind
+from .model import CasePriority, CaseStatus, TrustKind
 from .services.quality import AnalysisMode
 from .services.scoring import PROFILE_THRESHOLD_OFFSETS
 from .services.trust import MAX_TRUST_EXPIRY_DAYS, MAX_TRUST_REASON_LENGTH
@@ -925,3 +925,100 @@ class IrisTagCountSchema(Schema):
 class IrisTagListResponseSchema(Schema):
     """Etiquetas del usuario, de la más usada a la menos."""
     tags = fields.List(fields.Nested(IrisTagCountSchema))
+
+
+_CASE_STATUSES = [status.value for status in CaseStatus]
+_CASE_PRIORITIES = [priority.value for priority in CasePriority]
+
+
+class IrisCaseCreateRequestSchema(Schema):
+    """Cuerpo de ``POST /iris/cases``: título, prioridad, análisis y etiquetas iniciales."""
+    title = fields.String(required=True, validate=validate.Length(min=1, max=200))
+    priority = fields.String(load_default=CasePriority.MEDIUM.value, validate=validate.OneOf(_CASE_PRIORITIES))
+    analysisIds = fields.List(fields.Integer(), load_default=list, validate=validate.Length(max=50))
+    tags = fields.List(fields.String(validate=validate.Length(max=200)), load_default=list,
+                       validate=validate.Length(max=50))
+
+
+class IrisCaseUpdateRequestSchema(Schema):
+    """Cuerpo de ``PATCH /iris/cases/<id>``: solo cambia lo que viene.
+
+    ``assigneeId`` a ``null`` quita la asignación; solo puede ser el dueño del caso.
+    """
+    title = fields.String(validate=validate.Length(min=1, max=200))
+    priority = fields.String(validate=validate.OneOf(_CASE_PRIORITIES))
+    tags = fields.List(fields.String(validate=validate.Length(max=200)), validate=validate.Length(max=50))
+    assigneeId = fields.Integer(allow_none=True)
+
+
+class IrisCaseStatusRequestSchema(Schema):
+    """Cuerpo de ``POST /iris/cases/<id>/status``; ``reason`` es obligatoria al cerrar."""
+    status = fields.String(required=True, validate=validate.OneOf(_CASE_STATUSES))
+    reason = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=4000))
+
+
+class IrisCaseNoteRequestSchema(Schema):
+    """Cuerpo de ``POST /iris/cases/<id>/notes``."""
+    note = fields.String(required=True, validate=validate.Length(min=1, max=4000))
+
+
+class IrisCaseLinkRequestSchema(Schema):
+    """Cuerpo de ``POST /iris/cases/<id>/analyses``."""
+    analysisId = fields.Integer(required=True)
+
+
+class IrisCasesQuerySchema(Schema):
+    """Filtros de ``GET /iris/cases``; ninguno filtra por defecto."""
+    status = fields.String(load_default=None, validate=validate.OneOf(_CASE_STATUSES))
+    priority = fields.String(load_default=None, validate=validate.OneOf(_CASE_PRIORITIES))
+    assignedToMe = fields.Boolean(load_default=False)
+
+
+class IrisCaseAnalysisItemSchema(Schema):
+    """Un análisis de un caso, tal como es: el caso no lo modifica."""
+    analysisId = fields.Integer()
+    title = fields.String(allow_none=True)
+    status = fields.String()
+    verdict = fields.String(allow_none=True)
+    totalScore = fields.Float(allow_none=True)
+    confidence = fields.String(allow_none=True)
+    addedAt = fields.String()
+
+
+class IrisCaseEventSchema(Schema):
+    """Una entrada de la timeline: un cambio (``detail``) o una nota (``note``)."""
+    eventId = fields.Integer()
+    kind = fields.String()
+    detail = fields.Dict(allow_none=True)
+    note = fields.String(allow_none=True)
+    actor = fields.String(allow_none=True)
+    createdAt = fields.String()
+
+
+class IrisCaseSummarySchema(Schema):
+    """Lo que enseña el listado de casos."""
+    caseId = fields.Integer()
+    title = fields.String()
+    status = fields.String()
+    priority = fields.String()
+    assignee = fields.String(allow_none=True)
+    tags = fields.List(fields.String())
+    analysisCount = fields.Integer()
+    createdAt = fields.String()
+    updatedAt = fields.String()
+    closedAt = fields.String(allow_none=True)
+
+
+class IrisCaseDetailSchema(IrisCaseSummarySchema):
+    """Un caso entero: resumen, razón de cierre, análisis y timeline."""
+    assigneeId = fields.Integer(allow_none=True)
+    resolutionReason = fields.String(allow_none=True)
+    analyses = fields.List(fields.Nested(IrisCaseAnalysisItemSchema))
+    timeline = fields.List(fields.Nested(IrisCaseEventSchema))
+
+
+class IrisCaseListResponseSchema(Schema):
+    """Casos del usuario y cuántos tiene en cada estado (sin aplicar los filtros)."""
+    cases = fields.List(fields.Nested(IrisCaseSummarySchema))
+    total = fields.Integer()
+    countsByStatus = fields.Dict(keys=fields.String(), values=fields.Integer())
