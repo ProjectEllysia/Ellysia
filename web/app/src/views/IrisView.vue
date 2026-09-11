@@ -69,6 +69,12 @@
         </svg>
         Remitentes de confianza
       </router-link>
+      <router-link to="/iris/casos" class="back-link connections-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" />
+        </svg>
+        Casos
+      </router-link>
 
       <main class="iris-main">
         <IrisReportViewer

@@ -21,16 +21,11 @@ from src.modules.shared import assert_owned, isoformat_utc
 from ..exceptions import IrisInvalidInputError, IrisSavedViewNotFoundError
 from ..model import IrisAnalysisTag, IrisSavedView
 from ..repositories import IrisAnalysisTagRepository, IrisSavedViewRepository
+from ..services.tags import normalize_tags
 from .analysis import IrisManager
 
 #: Vistas guardadas por usuario. Una lista más larga deja de ser un atajo.
 MAX_SAVED_VIEWS = 50
-
-#: Etiquetas por análisis.
-MAX_TAGS_PER_ANALYSIS = 10
-
-#: Longitud máxima de una etiqueta; coincide con la columna.
-MAX_TAG_LENGTH = 40
 
 #: Longitud máxima del nombre de una vista; coincide con la columna.
 MAX_VIEW_NAME_LENGTH = 60
@@ -46,33 +41,6 @@ def _invalid_input(text: str) -> IrisInvalidInputError:
         IrisInvalidInputError: Con ``user_message`` igual a ``text``.
     """
     return IrisInvalidInputError(text, user_message=text)
-
-
-def _normalize_tags(tags: Sequence[str]) -> List[str]:
-    """Limpia una lista de etiquetas antes de guardarla.
-
-    Args:
-        tags: Etiquetas tal como las escribió el usuario.
-
-    Returns:
-        List[str]: En minúsculas, con los espacios interiores colapsados, sin
-            vacías ni duplicadas, en el orden en que llegaron.
-
-    Raises:
-        IrisInvalidInputError: Si alguna supera ``MAX_TAG_LENGTH`` o si son
-            más de ``MAX_TAGS_PER_ANALYSIS``.
-    """
-    normalized: List[str] = []
-    for tag in tags:
-        cleaned = " ".join((tag or "").split()).lower()
-        if not cleaned or cleaned in normalized:
-            continue
-        if len(cleaned) > MAX_TAG_LENGTH:
-            raise _invalid_input(f"Una etiqueta no puede pasar de {MAX_TAG_LENGTH} caracteres.")
-        normalized.append(cleaned)
-    if len(normalized) > MAX_TAGS_PER_ANALYSIS:
-        raise _invalid_input(f"Como mucho {MAX_TAGS_PER_ANALYSIS} etiquetas por análisis.")
-    return normalized
 
 
 class IrisTriageManager:
@@ -160,7 +128,7 @@ class IrisTriageManager:
 
         Returns:
             List[str]: Las etiquetas que quedan, ya normalizadas (ver
-                ``_normalize_tags``).
+                ``services/tags.normalize_tags``).
 
         Raises:
             IrisAnalysisNotFoundError: Si el análisis no existe o no es suyo.
@@ -168,7 +136,10 @@ class IrisTriageManager:
                 demasiadas.
         """
         IrisManager.assert_analysis_ownership(analysis_id, user_id)
-        normalized = _normalize_tags(tags)
+        try:
+            normalized = normalize_tags(tags)
+        except ValueError as e:
+            raise _invalid_input(str(e)) from e
         with UnitOfWork() as uow:
             repo = IrisAnalysisTagRepository(uow)
             repo.delete_by_analysis(analysis_id)

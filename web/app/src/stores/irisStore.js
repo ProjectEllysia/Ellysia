@@ -517,6 +517,99 @@ export const useIrisStore = defineStore('iris', () => {
     return true
   }
 
+  /* ═══════════════════════ CASOS DE ANALISTA ══════════════════════════ */
+
+  const cases = reactive({
+    items: [],
+    total: 0,
+    countsByStatus: {},
+    loading: false,
+    filters: { status: '', priority: '', assignedToMe: false },
+  })
+  const currentCase = ref(null)
+
+  /** Carga los casos del usuario con los filtros de `cases.filters`. */
+  async function fetchCases() {
+    cases.loading = true
+    try {
+      const params = new URLSearchParams()
+      if (cases.filters.status) params.set('status', cases.filters.status)
+      if (cases.filters.priority) params.set('priority', cases.filters.priority)
+      if (cases.filters.assignedToMe) params.set('assignedToMe', 'true')
+      const res = await apiFetch(`/iris/cases?${params}`)
+      if (!res?.ok) return
+      const data = await res.json()
+      cases.items = data.cases ?? []
+      cases.total = data.total ?? 0
+      cases.countsByStatus = data.countsByStatus ?? {}
+    } finally {
+      cases.loading = false
+    }
+  }
+
+  /** Carga un caso entero (análisis y timeline) en `currentCase`. */
+  async function fetchCase(id) {
+    const res = await apiFetch(`/iris/cases/${id}`)
+    currentCase.value = res?.ok ? await res.json() : null
+    return currentCase.value
+  }
+
+  /**
+   * Petición que devuelve el caso actualizado: lo deja en `currentCase` y
+   * refresca la lista. Si falla, avisa con el mensaje del servidor.
+   * @returns {Promise<object|null>} El caso, o null si falló.
+   */
+  async function _caseRequest(url, method, body, errorText) {
+    const res = await apiFetch(url, { method, body: body === undefined ? undefined : JSON.stringify(body) })
+    if (!res?.ok) {
+      toast.show(await apiError(res, errorText), 'error')
+      return null
+    }
+    currentCase.value = await res.json()
+    fetchCases()
+    return currentCase.value
+  }
+
+  /**
+   * Abre un caso.
+   * @param {{title: string, priority?: string, analysisIds?: number[], tags?: string[]}} data
+   * @returns {Promise<object|null>} El caso abierto, o null si falló.
+   */
+  async function createCase(data) {
+    const created = await _caseRequest('/iris/cases', 'POST', data, 'No se pudo abrir el caso.')
+    if (created) toast.show(`Caso #${created.caseId} abierto.`, 'success')
+    return created
+  }
+
+  /** Cambia título, prioridad, etiquetas o asignación (`assigneeId: null` la quita). */
+  function updateCase(id, changes) {
+    return _caseRequest(`/iris/cases/${id}`, 'PATCH', changes, 'No se pudo actualizar el caso.')
+  }
+
+  /** Mueve un caso de estado; cerrarlo exige `reason`. */
+  function changeCaseStatus(id, status, reason = null) {
+    return _caseRequest(`/iris/cases/${id}/status`, 'POST', { status, reason }, 'No se pudo cambiar el estado.')
+  }
+
+  /** Añade una nota a la timeline del caso. */
+  function addCaseNote(id, note) {
+    return _caseRequest(`/iris/cases/${id}/notes`, 'POST', { note }, 'No se pudo guardar la nota.')
+  }
+
+  /** Vincula un análisis a un caso. */
+  async function linkCaseAnalysis(id, analysisId) {
+    const updated = await _caseRequest(`/iris/cases/${id}/analyses`, 'POST', { analysisId },
+      'No se pudo añadir el análisis al caso.')
+    if (updated) toast.show(`Análisis #${analysisId} añadido al caso #${id}.`, 'success')
+    return updated
+  }
+
+  /** Desvincula un análisis de un caso (el análisis no se borra). */
+  function unlinkCaseAnalysis(id, analysisId) {
+    return _caseRequest(`/iris/cases/${id}/analyses/${analysisId}`, 'DELETE', undefined,
+      'No se pudo quitar el análisis del caso.')
+  }
+
   /* ═══════════════════ EXCEPCIONES DE CONFIANZA ═══════════════════════ */
 
   const trustedSenders = ref([])
@@ -778,6 +871,9 @@ export const useIrisStore = defineStore('iris', () => {
     archive.sort = { by: 'date', dir: 'desc' }
     savedViews.value = []
     userTags.value = []
+    Object.assign(cases, { items: [], total: 0, countsByStatus: {}, loading: false,
+      filters: { status: '', priority: '', assignedToMe: false } })
+    currentCase.value = null
 
     currentId.value = null
     Object.assign(currentReport, { loading: false, data: null })
@@ -802,6 +898,9 @@ export const useIrisStore = defineStore('iris', () => {
     fetchArchive, setArchiveFilters, resetArchiveFilters, setArchiveSort, goToArchivePage,
     savedViews, userTags, fetchSavedViews, saveArchiveView, applySavedView, deleteSavedView,
     fetchTags, setAnalysisTags, fetchReportById,
+    cases, currentCase, fetchCases, fetchCase, createCase, updateCase, changeCaseStatus,
+    addCaseNote, linkCaseAnalysis, unlinkCaseAnalysis,
+    trustedSenders, trustedSendersLoading, fetchTrustedSenders, createTrustedSender, revokeTrustedSender,
     submitAnalysis, fetchResults, getReport, getStatus, pathFor, iocsFor,
     resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,
     generateAiSummary, checkAiSummary,

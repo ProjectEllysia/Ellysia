@@ -108,6 +108,12 @@ class IrisSavedViewNotFoundError(EntityNotFoundError, IrisError):
     id_field = "view_id"
 
 
+class IrisCaseNotFoundError(EntityNotFoundError, IrisError):
+    """El caso no existe o no es del usuario (mismo error para los dos)."""
+    entity_label = "Caso"
+    id_field = "case_id"
+
+
 class IrisMailboxInvalidProviderError(IrisError):
     """Raised when connecting to an unsupported mailbox provider."""
     default_code = ErrorCode.VALIDATION_ERROR
