@@ -25,11 +25,9 @@ from src.modules.users import (
     require_attributes,
     require_role,
     AttributeType,
+    Role,
     get_current_user,
 )
-# Role no está entre lo que reexporta el paquete users (mismo caso que en
-# accounts/endpoints.py), así que se pide a su módulo.
-from src.modules.users.services.permissions import Role
 from src.modules.shared import handle_exceptions, limiter
 from src.modules.shared.schemas import ErrorSchema
 from src.modules.shared._exceptions import DocumentError, DocumentNotReadyError

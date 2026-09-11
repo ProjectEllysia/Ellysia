@@ -48,6 +48,37 @@ def _invalid_input(text: str) -> IrisInvalidInputError:
     return IrisInvalidInputError(text, user_message=text)
 
 
+def _ad_hoc_samples(messages: List[Mapping[str, Any]]) -> List[ReplaySample]:
+    """Valida los mensajes pegados por el administrador y los prepara.
+
+    Args:
+        messages: Lista de ``{raw, label}``; ``label`` es opcional.
+
+    Returns:
+        List[ReplaySample]: Una muestra por mensaje, ``mensaje-1``,
+            ``mensaje-2``…
+
+    Raises:
+        IrisInvalidInputError: Si hay demasiados mensajes, alguno supera el
+            tamaño máximo o no es un correo analizable; el mensaje dice cuál.
+    """
+    if len(messages) > MAX_AD_HOC_MESSAGES:
+        raise _invalid_input(f"Como mucho {MAX_AD_HOC_MESSAGES} mensajes por simulación.")
+    max_bytes = CR.iris_config().max_message_bytes
+    samples = []
+    for index, message in enumerate(messages, start=1):
+        raw = message["raw"]
+        if len(raw.encode("utf-8")) > max_bytes:
+            raise _invalid_input(f"El mensaje {index} supera el tamaño máximo ({max_bytes} bytes).")
+        try:
+            IrisManager._validate_headers_pre(raw)  # pylint: disable=protected-access
+            IrisManager._validate_headers_parsed(parse_raw_message(raw).headers)  # pylint: disable=protected-access
+        except IrisInvalidInputError as e:
+            raise _invalid_input(f"El mensaje {index} no es un correo analizable: {e}") from e
+        samples.append(ReplaySample(f"mensaje-{index}", raw, message.get("label")))
+    return samples
+
+
 class IrisReplayManager:
     """Compara la política vigente (o una dada) con una candidata."""
 
@@ -96,37 +127,6 @@ class IrisReplayManager:
             )
         return policy
 
-    @staticmethod
-    def _ad_hoc_samples(messages: List[Mapping[str, Any]]) -> List[ReplaySample]:
-        """Valida los mensajes pegados por el administrador y los prepara.
-
-        Args:
-            messages: Lista de ``{raw, label}``; ``label`` es opcional.
-
-        Returns:
-            List[ReplaySample]: Una muestra por mensaje, ``mensaje-1``,
-                ``mensaje-2``…
-
-        Raises:
-            IrisInvalidInputError: Si hay demasiados mensajes, alguno supera el
-                tamaño máximo o no es un correo analizable; el mensaje dice cuál.
-        """
-        if len(messages) > MAX_AD_HOC_MESSAGES:
-            raise _invalid_input(f"Como mucho {MAX_AD_HOC_MESSAGES} mensajes por simulación.")
-        max_bytes = CR.iris_config().max_message_bytes
-        samples = []
-        for index, message in enumerate(messages, start=1):
-            raw = message["raw"]
-            if len(raw.encode("utf-8")) > max_bytes:
-                raise _invalid_input(f"El mensaje {index} supera el tamaño máximo ({max_bytes} bytes).")
-            try:
-                IrisManager._validate_headers_pre(raw)  # pylint: disable=protected-access
-                IrisManager._validate_headers_parsed(parse_raw_message(raw).headers)  # pylint: disable=protected-access
-            except IrisInvalidInputError as e:
-                raise _invalid_input(f"El mensaje {index} no es un correo analizable: {e}") from e
-            samples.append(ReplaySample(f"mensaje-{index}", raw, message.get("label")))
-        return samples
-
     def run(self, candidate_spec: Mapping[str, Any], baseline_spec: Optional[Mapping[str, Any]] = None,
             messages: Optional[List[Mapping[str, Any]]] = None, include_corpus: bool = True) -> Dict[str, Any]:
         """Ejecuta la simulación y devuelve el informe de replay.
@@ -154,7 +154,7 @@ class IrisReplayManager:
         samples: List[ReplaySample] = []
         if include_corpus:
             corpus_version, samples = load_corpus(CORPUS_DIRECTORY)
-        samples += self._ad_hoc_samples(list(messages or []))
+        samples += _ad_hoc_samples(list(messages or []))
         if not samples:
             raise _invalid_input("No hay nada que comparar: incluye el corpus o añade algún mensaje.")
 

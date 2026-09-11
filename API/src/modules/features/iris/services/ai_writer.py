@@ -51,6 +51,38 @@ def _extract_json_with_regex(raw: str) -> Optional[dict]:
     return None
 
 
+def _confidence_note(report: Dict[str, Any]) -> str:
+    """Aviso de confianza y cobertura que se añade al final del prompt.
+
+    Va anexado, igual que ``_degradation_note``, para no depender de que la
+    plantilla desplegada en ``SecOpsConfig.json`` tenga un marcador nuevo.
+    Le da al modelo la misma confianza ordinal y los mismos motivos que ve
+    el analista en la UI y en el PDF, y le prohíbe convertirla en un
+    porcentaje: el score no está calibrado y un número inventaría precisión.
+
+    Args:
+        report: Informe de ``IrisManager.get_analysis_results``; se leen
+            ``confidence``, ``coverage`` y ``uncertaintyReasons``.
+
+    Returns:
+        str: El aviso, o cadena vacía si el informe no trae confianza
+            (análisis anteriores a que se calculara).
+    """
+    label = _ANALYSIS_CONFIDENCE_LABELS.get(report.get("confidence") or "")
+    if label is None:
+        return ""
+    coverage = report.get("coverage") or {}
+    coverage_text = ("solo cabeceras (no se inspeccionó cuerpo ni adjuntos)"
+                     if coverage.get("mode") == "headers_only" else "mensaje completo")
+    reasons = report.get("uncertaintyReasons") or []
+    reasons_text = (" Motivos: " + " ".join(reasons)) if reasons else ""
+    return (
+        f"\n\nCONFIANZA DEL ANÁLISIS: {label}. Cobertura: {coverage_text}.{reasons_text} "
+        "Usa exactamente esta confianza en el campo \"confidence\", no la "
+        "expreses como porcentaje y no afirmes más certeza de la que indica."
+    )
+
+
 class IrisAIWriter:
     """Generates an executive narrative (summary, attacker intent,
     recommendations, confidence) from a finished Iris analysis report.
@@ -120,38 +152,6 @@ class IrisAIWriter:
             "ausencia de hallazgos."
         )
 
-    @staticmethod
-    def _confidence_note(report: Dict[str, Any]) -> str:
-        """Aviso de confianza y cobertura que se añade al final del prompt.
-
-        Va anexado, igual que ``_degradation_note``, para no depender de que la
-        plantilla desplegada en ``SecOpsConfig.json`` tenga un marcador nuevo.
-        Le da al modelo la misma confianza ordinal y los mismos motivos que ve
-        el analista en la UI y en el PDF, y le prohíbe convertirla en un
-        porcentaje: el score no está calibrado y un número inventaría precisión.
-
-        Args:
-            report: Informe de ``IrisManager.get_analysis_results``; se leen
-                ``confidence``, ``coverage`` y ``uncertaintyReasons``.
-
-        Returns:
-            str: El aviso, o cadena vacía si el informe no trae confianza
-                (análisis anteriores a que se calculara).
-        """
-        label = _ANALYSIS_CONFIDENCE_LABELS.get(report.get("confidence") or "")
-        if label is None:
-            return ""
-        coverage = report.get("coverage") or {}
-        coverage_text = ("solo cabeceras (no se inspeccionó cuerpo ni adjuntos)"
-                         if coverage.get("mode") == "headers_only" else "mensaje completo")
-        reasons = report.get("uncertaintyReasons") or []
-        reasons_text = (" Motivos: " + " ".join(reasons)) if reasons else ""
-        return (
-            f"\n\nCONFIANZA DEL ANÁLISIS: {label}. Cobertura: {coverage_text}.{reasons_text} "
-            "Usa exactamente esta confianza en el campo \"confidence\", no la "
-            "expreses como porcentaje y no afirmes más certeza de la que indica."
-        )
-
     def _build_user_prompt(self, report: Dict[str, Any]) -> str:
         failed_rules = [
             {
@@ -172,7 +172,7 @@ class IrisAIWriter:
             .replace("{{gate_reasons_json}}", json.dumps(report.get("gateReasons") or [], ensure_ascii=False))
             .replace("{{failed_rules_json}}", json.dumps(failed_rules, indent=2, ensure_ascii=False))
         )
-        return prompt + self._degradation_note(report) + self._confidence_note(report)
+        return prompt + self._degradation_note(report) + _confidence_note(report)
 
     def generate(self, report: Dict[str, Any]) -> dict:
         """Generate the AI narrative for a finished analysis report dict.
