@@ -8,6 +8,7 @@ the output of every individual rule that was executed during the analysis.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Optional
 
 from sqlalchemy import (
@@ -93,6 +94,13 @@ class IrisAnalysis(Base):
                  (``contextType``, ``verdict``, ``totalScore``,
                  ``analysisQuality``); NULL cuando no hubo reenvío. Sus
                  reglas están en ``IrisRuleResult`` con su ``context_type``.
+        trust_applied: Rastro de la excepción de confianza del usuario que
+                 coincidió con el remitente del contexto ganador:
+                 ``entryId``, ``kind``, ``value``, ``reason``, ``applied``
+                 (``False`` si el mensaje no demostró venir de ese remitente)
+                 y ``modulatedRules``. Se guarda aunque la excepción se
+                 revoque después: es la auditoría de por qué este veredicto es
+                 el que es. NULL si ninguna excepción coincidió.
         failure_code: Why a ``failed`` analysis failed — "invalid_input"
                  (the submitted text is not an analysable message) or
                  "internal_error" (the pipeline broke). NULL for every
@@ -159,6 +167,7 @@ class IrisAnalysis(Base):
     winning_context = Column(String(16), nullable=True)
     winning_reason = Column(Text, nullable=True)
     secondary_context = Column(JSONB, nullable=True)
+    trust_applied = Column(JSONB, nullable=True)
     failure_code = Column(String(32), nullable=True)
     failure_reason = Column(Text, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
@@ -672,3 +681,61 @@ class IrisNotificationPreference(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
 
     user = relationship("User")
+
+
+class TrustKind(StrEnum):
+    """Qué cubre una excepción de confianza (``IrisTrustedSender.kind``).
+
+    Attributes:
+        SENDER: Una dirección exacta del ``From``.
+        DOMAIN: El dominio del ``From`` y todos sus subdominios.
+    """
+    SENDER = "sender"
+    DOMAIN = "domain"
+
+
+class IrisTrustedSender(Base):
+    """Excepción de confianza de un usuario: un remitente o un dominio del que
+    no quiere seguir recibiendo el mismo falso positivo.
+
+    Es por usuario a propósito, no por organización: una organización comparte
+    plan y factura, no datos (ver ``Organization``), e Iris analiza correo
+    personal; una excepción declarada por el dueño cambiaría los veredictos del
+    correo de sus miembros.
+
+    No se borra al revocarse: ``revoked_at`` la desactiva y la fila queda para
+    la auditoría. Qué hace al analizar un mensaje lo decide
+    ``services/trust.py``: solo se aplica si el mensaje demuestra venir de ahí,
+    y solo neutraliza señales de redacción y de forma, nunca las de
+    autenticación, adjuntos o enlaces.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño, que es también quien la creó;
+                 ``ondelete="CASCADE"``.
+        kind: ``TrustKind``: ``sender`` o ``domain``.
+        value: Dirección o dominio, normalizado en minúsculas (ver
+                 ``services/trust.normalize_trust_value``).
+        reason: Por qué se confía en él; obligatorio.
+        created_at: Cuándo se creó.
+        expires_at: Cuándo deja de aplicarse; como mucho
+                 ``services/trust.MAX_TRUST_EXPIRY_DAYS`` después de crearse.
+        revoked_at: Cuándo se revocó; NULL si no se ha revocado.
+        user: Relación al ``User`` dueño.
+    """
+    __tablename__ = "IrisTrustedSender"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(16), nullable=False)
+    value = Column(String(320), nullable=False)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    expires_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("ix_iris_trusted_sender_user_id", "user_id"),
+    )

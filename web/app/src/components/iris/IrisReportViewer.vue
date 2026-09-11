@@ -150,6 +150,37 @@
           por {{ reportData.latestFeedback.author }} · {{ formatDate(reportData.latestFeedback.createdAt) }}
           <template v-if="reportData.latestFeedback.note"> — «{{ reportData.latestFeedback.note }}»</template>
         </p>
+        <!-- Falso positivo recurrente: confiar en el remitente para los
+             próximos análisis. No toca este veredicto. -->
+        <button v-if="!trustFormOpen" type="button" class="feedback-option trust-open" @click="trustFormOpen = true">
+          Confiar en este remitente…
+        </button>
+        <IrisTrustForm
+          v-else
+          :from-header="reportData.previewHeaders?.from ?? ''"
+          cancellable
+          @saved="trustFormOpen = false"
+          @cancel="trustFormOpen = false"
+        />
+      </div>
+
+      <!-- Excepción de confianza que coincidió con el remitente: aplicada
+           (qué reglas neutralizó) o ignorada (el mensaje no demostró venir de
+           ahí). Es parte de la explicación del veredicto. -->
+      <div v-if="reportData.trustApplied" class="rv-trust" :class="{ 'rv-trust--ignored': !reportData.trustApplied.applied }">
+        <strong class="uncertainty-title">
+          {{ reportData.trustApplied.applied ? 'Excepción de confianza aplicada' : 'Excepción de confianza no aplicada' }}
+        </strong>
+        <p class="trust-detail">
+          {{ reportData.trustApplied.kind === 'domain' ? 'Dominio' : 'Remitente' }}
+          <code>{{ reportData.trustApplied.value }}</code> — «{{ reportData.trustApplied.reason }}».
+          <template v-if="reportData.trustApplied.applied">
+            Reglas neutralizadas: {{ reportData.trustApplied.modulatedRules.join(' · ') || 'ninguna penalizaba' }}.
+          </template>
+          <template v-else>
+            El mensaje no demuestra venir de ahí, así que se analizó sin la excepción.
+          </template>
+        </p>
       </div>
 
       <!-- Análisis degradado: alguna regla no llegó a ejecutarse, así que
@@ -360,6 +391,7 @@ import IrisDocumentsModal from '@/components/iris/IrisDocumentsModal.vue'
 import IrisRuleCard from '@/components/iris/IrisRuleCard.vue'
 import IrisIocsPanel from '@/components/iris/IrisIocsPanel.vue'
 import IrisVerdictHero from '@/components/iris/IrisVerdictHero.vue'
+import IrisTrustForm from '@/components/iris/IrisTrustForm.vue'
 
 const { formatDate } = useUtils()
 const irisStore = useIrisStore()
@@ -464,10 +496,13 @@ const FEEDBACK_LABELS = { malicious: 'malicioso', legitimate: 'legítimo', unkno
 const feedbackLabel = ref(null)
 const feedbackNote = ref('')
 const feedbackSaving = ref(false)
+// Formulario «Confiar en este remitente» (excepción de confianza).
+const trustFormOpen = ref(false)
 
 watch(() => props.reportData?.analysisId, () => {
   feedbackLabel.value = null
   feedbackNote.value = ''
+  trustFormOpen.value = false
 })
 
 async function saveFeedback() {
@@ -1109,6 +1144,25 @@ watch(
 .raw-line--hit {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 3px;
+}
+
+.trust-open { margin-top: 0.6rem; }
+
+.rv-trust {
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(96, 128, 224, 0.25);
+  border-radius: 10px;
+  background: var(--info-dim);
+}
+.rv-trust--ignored {
+  border-color: rgba(212, 160, 74, 0.3);
+  background: var(--warn-dim);
+}
+.trust-detail {
+  margin: 0.35rem 0 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+  color: var(--text-dim);
 }
 
 .rv-gates {

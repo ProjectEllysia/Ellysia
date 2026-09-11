@@ -19,7 +19,7 @@ from src.modules.shared import utcnow_naive
 from .model import (
     IrisAnalystFeedback,
     IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisNotificationPreference,
-    IrisRawMessage, IrisRuleResult, IrisDocument,
+    IrisRawMessage, IrisRuleResult, IrisDocument, IrisTrustedSender,
 )
 
 
@@ -641,6 +641,80 @@ class IrisNotificationPreferenceRepository(BaseRepository[IrisNotificationPrefer
             )
             .all()
         )
+
+
+class IrisTrustedSenderRepository(BaseRepository[IrisTrustedSender]):
+    """Acceso a las excepciones de confianza (``IrisTrustedSender``).
+
+    Las filas no se borran al revocarse: la auditoría necesita las caducadas y
+    las revocadas tanto como las activas.
+    """
+
+    _MODEL = IrisTrustedSender
+
+    def get_by_user(self, user_id: int) -> List[IrisTrustedSender]:
+        """Todas las excepciones de un usuario, de la más reciente a la más antigua.
+
+        Args:
+            user_id: Dueño de las excepciones.
+
+        Returns:
+            List[IrisTrustedSender]: Activas, caducadas y revocadas; lista
+                vacía si no tiene ninguna.
+        """
+        return (
+            self._session.query(IrisTrustedSender)
+            .filter(IrisTrustedSender.user_id == user_id)
+            .order_by(IrisTrustedSender.id.desc())
+            .all()
+        )
+
+    def get_active_for_user(self, user_id: int, now: datetime) -> List[IrisTrustedSender]:
+        """Excepciones de un usuario que siguen en vigor en un instante.
+
+        Args:
+            user_id: Dueño de las excepciones.
+            now: Instante de referencia (UTC naive).
+
+        Returns:
+            List[IrisTrustedSender]: Las no revocadas cuya caducidad es
+                posterior a ``now``.
+        """
+        return (
+            self._session.query(IrisTrustedSender)
+            .filter(
+                IrisTrustedSender.user_id == user_id,
+                IrisTrustedSender.revoked_at.is_(None),
+                IrisTrustedSender.expires_at > now,
+            )
+            .order_by(IrisTrustedSender.id.asc())
+            .all()
+        )
+
+    def has_active(self, user_id: int, kind: str, value: str, now: datetime) -> bool:
+        """Si el usuario ya tiene en vigor una excepción idéntica.
+
+        Args:
+            user_id: Dueño de las excepciones.
+            kind: ``sender`` o ``domain``.
+            value: Valor ya normalizado.
+            now: Instante de referencia (UTC naive).
+
+        Returns:
+            bool: ``True`` si hay una no revocada y no caducada con ese tipo y
+                valor.
+        """
+        return (
+            self._session.query(IrisTrustedSender.id)
+            .filter(
+                IrisTrustedSender.user_id == user_id,
+                IrisTrustedSender.kind == kind,
+                IrisTrustedSender.value == value,
+                IrisTrustedSender.revoked_at.is_(None),
+                IrisTrustedSender.expires_at > now,
+            )
+            .first()
+        ) is not None
 
 
 class IrisReportRepository(DocumentRepository[IrisDocument]):

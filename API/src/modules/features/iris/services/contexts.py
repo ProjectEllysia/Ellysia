@@ -54,6 +54,10 @@ class ContextEvaluation:
         coverage: Cobertura de este contexto (``mode`` y ``uncoveredRules``,
             ver ``services/quality.assess_coverage``). Por defecto un dict
             vacío, que se lee como "sin información de cobertura".
+        trust_applied: Rastro de la excepción de confianza que coincidió con
+            el remitente de este contexto (ver
+            ``services/trust.build_trust_record``), se aplicara o no. Por
+            defecto ``None``: ninguna excepción coincidió.
     """
 
     context_type: str
@@ -63,6 +67,7 @@ class ContextEvaluation:
     results: List[Any]
     quality: Any
     coverage: Dict[str, Any] = field(default_factory=dict)
+    trust_applied: Dict[str, Any] | None = None
 
 
 def choose_winning_evaluation(

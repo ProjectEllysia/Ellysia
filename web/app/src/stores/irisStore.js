@@ -419,6 +419,61 @@ export const useIrisStore = defineStore('iris', () => {
     return true
   }
 
+  /* ═══════════════════ EXCEPCIONES DE CONFIANZA ═══════════════════════ */
+
+  const trustedSenders = ref([])
+  const trustedSendersLoading = ref(false)
+
+  /**
+   * Carga las excepciones de confianza del usuario.
+   * @param {boolean} includeInactive Si se incluyen también las caducadas y
+   *   las revocadas (vista de auditoría).
+   */
+  async function fetchTrustedSenders(includeInactive = false) {
+    trustedSendersLoading.value = true
+    try {
+      const params = new URLSearchParams({ includeInactive: includeInactive ? 'true' : 'false' })
+      const res = await apiFetch(`/iris/trusted-senders?${params}`)
+      if (!res?.ok) { trustedSenders.value = []; return }
+      trustedSenders.value = (await res.json()).trustedSenders ?? []
+    } finally {
+      trustedSendersLoading.value = false
+    }
+  }
+
+  /**
+   * Declara un remitente o dominio de confianza.
+   * @param {{kind: 'sender'|'domain', value: string, reason: string, expiresInDays: number}} entry
+   * @returns {Promise<object|null>} La excepción creada, o null si falló.
+   */
+  async function createTrustedSender(entry) {
+    const res = await apiFetch('/iris/trusted-senders', {
+      method: 'POST',
+      body: JSON.stringify(entry),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo guardar la excepción.'), 'error')
+      return null
+    }
+    toast.show('Excepción guardada. Se aplicará a los próximos análisis (reanaliza este para verla).', 'success')
+    return res.json()
+  }
+
+  /**
+   * Revoca una excepción. No la borra: sigue en la auditoría.
+   * @param {number} id Excepción a revocar.
+   * @returns {Promise<boolean>} true si se revocó.
+   */
+  async function revokeTrustedSender(id) {
+    const res = await apiFetch(`/iris/trusted-senders/${id}`, { method: 'DELETE' })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo revocar la excepción.'), 'error')
+      return false
+    }
+    toast.show('Excepción revocada.', 'success')
+    return true
+  }
+
   /**
    * Solicita la narrativa ejecutiva IA (IA1) y sondea el informe hasta que
    * aparece `aiSummary` — no hay endpoint de estado propio, la narrativa es

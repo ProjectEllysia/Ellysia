@@ -36,7 +36,7 @@ import src.modules.system.config_reading as CR
 
 from .managers import (
     IrisFeedbackManager, IrisManager, IrisReportManager, IrisMailboxManager,
-    IrisNotificationPreferenceManager, IrisReplayManager,
+    IrisNotificationPreferenceManager, IrisReplayManager, IrisTrustPolicyManager,
 )
 from .exceptions import (
     IrisAnalysisNotFoundError,
@@ -44,6 +44,7 @@ from .exceptions import (
     IrisInvalidInputError,
     IrisMailboxConnectionNotFoundError,
     IrisMailboxOAuthStateError,
+    IrisTrustedSenderNotFoundError,
 )
 from .schemas import (
     AnalysisIdQuerySchema,
@@ -87,6 +88,10 @@ from .schemas import (
     IrisFeedbackMetricsResponseSchema,
     IrisReplayRequestSchema,
     IrisReplayResponseSchema,
+    IrisTrustedSenderItemSchema,
+    IrisTrustedSenderListResponseSchema,
+    IrisTrustedSenderRequestSchema,
+    IrisTrustedSendersQuerySchema,
 )
 
 
@@ -223,6 +228,59 @@ def get_feedback_metrics():
     """Precisión, recall, cobertura y desacuerdo del detector según tus correcciones"""
     user = get_current_user()
     return IrisFeedbackManager().get_metrics(user.id)
+
+
+@iris_blp.get("/trusted-senders")
+@iris_blp.arguments(IrisTrustedSendersQuerySchema, location="query")
+@iris_blp.response(200, IrisTrustedSenderListResponseSchema, description="Trusted-sender exceptions")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(logger=logger)
+def list_trusted_senders(args: dict):
+    """Excepciones de confianza del usuario (con includeInactive, también caducadas y revocadas)"""
+    user = get_current_user()
+    entries = IrisTrustPolicyManager().list_entries(user.id, args["includeInactive"])
+    return {"trustedSenders": entries, "total": len(entries)}
+
+
+@iris_blp.post("/trusted-senders")
+@iris_blp.arguments(IrisTrustedSenderRequestSchema)
+@iris_blp.response(201, IrisTrustedSenderItemSchema, description="Trusted-sender exception created")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid value or duplicate exception")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisExecutionError, logger=logger)
+def create_trusted_sender(data):
+    """Declarar un remitente o dominio de confianza para los próximos análisis del usuario"""
+    user = get_current_user()
+    entry = IrisTrustPolicyManager().create_entry(
+        user.id, data["kind"], data["value"], data["reason"], data.get("expiresInDays"),
+    )
+    logger.info(f"Excepción de confianza {entry['trustedSenderId']} creada por {user.username}")
+    return entry
+
+
+@iris_blp.delete("/trusted-senders/<int:trusted_sender_id>")
+@iris_blp.response(200, IrisTrustedSenderItemSchema, description="Trusted-sender exception revoked")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Exception not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_DELETE])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisTrustedSenderNotFoundError, logger=logger)
+def revoke_trusted_sender(trusted_sender_id: int):
+    """Revocar una excepción de confianza; no se borra, queda en la auditoría"""
+    user = get_current_user()
+    entry = IrisTrustPolicyManager().revoke_entry(trusted_sender_id, user.id)
+    logger.info(f"Excepción de confianza {trusted_sender_id} revocada por {user.username}")
+    return entry
 
 
 @iris_blp.get("/retention-policy")

@@ -71,7 +71,16 @@ from ..services.quality import (
     detector_version,
 )
 from ..services.ai_writer import IrisAIWriter
+from ..services.trust import (
+    TrustEntry,
+    apply_trust,
+    build_trust_record,
+    describe_trust_record,
+    find_matching_entry,
+    is_sender_authenticated,
+)
 from .notifications import IrisPhishingNotifyManager
+from .trust import IrisTrustPolicyManager
 
 
 logger = logging.getLogger(__name__)
@@ -484,6 +493,7 @@ class IrisManager(TaskTrackingMixin):
             "rules": rules_data,
             "recommendations": recommendations,
             "latestFeedback": latest_feedback,
+            "trustApplied": analysis.trust_applied,
         }
 
     @classmethod
@@ -1111,8 +1121,14 @@ class IrisManager(TaskTrackingMixin):
                 # La política se fija una vez por análisis y se guarda con él:
                 # un cambio de configuración a mitad no mezcla dos versiones.
                 policy = current_policy()
+                # Las excepciones de confianza del dueño se leen una vez por
+                # análisis, igual que la política: revocar una a mitad no
+                # mezcla dos criterios sobre el mismo mensaje.
+                owner = self.get_analysis(analysis_id)
+                trust_entries = IrisTrustPolicyManager.get_active_entries(owner.user_id) if owner else []
                 with CR.scoring_weight_overrides(policy.weight_overrides):
-                    evaluations = self._evaluate_contexts(analysis_id, context, job, rules_defs, policy)
+                    evaluations = self._evaluate_contexts(analysis_id, context, job, rules_defs, policy,
+                                                          trust_entries)
 
                 if evaluations is None:
                     return  # cancelado: no es un fallo, no hay nada que persistir
@@ -1230,7 +1246,8 @@ class IrisManager(TaskTrackingMixin):
         }
 
     def _evaluate_contexts(self, analysis_id: Optional[int], context, job, rules_defs: List[dict],
-                           policy: Optional[ScoringPolicy] = None) -> Optional[List[ContextEvaluation]]:
+                           policy: Optional[ScoringPolicy] = None,
+                           trust_entries: Optional[List[TrustEntry]] = None) -> Optional[List[ContextEvaluation]]:
         """Ejecuta el catálogo de reglas sobre cada contexto del mensaje.
 
         Vive aparte de :meth:`_run_analysis` para que el ``try`` de ciclo de
@@ -1248,6 +1265,9 @@ class IrisManager(TaskTrackingMixin):
                 progreso que informar.
             rules_defs: Catálogo de reglas, leído una sola vez por análisis.
             policy: Política con que se puntúa y decide. Por defecto ``None``: la vigente.
+            trust_entries: Excepciones de confianza activas del dueño del
+                análisis (ver ``services/trust.py``). Por defecto ``None``:
+                ninguna, que es lo que usan el replay y las comparaciones.
 
         Returns:
             Optional[List[ContextEvaluation]]: Una evaluación por contexto,
@@ -1311,6 +1331,20 @@ class IrisManager(TaskTrackingMixin):
                 if job is not None:
                     job.progress(int((completed_steps / total_steps) * 100))
 
+            # Una excepción de confianza del usuario solo se aplica si el
+            # mensaje demuestra venir de ese remitente, y solo neutraliza las
+            # reglas que cubre: se resuelve antes de puntuar y de los gates
+            # para que ni el score ni los gates de esas reglas la ignoren.
+            trust_record = None
+            trust_entry = find_matching_entry(evaluated_context.headers, trust_entries or [])
+            if trust_entry is not None:
+                is_applied = is_sender_authenticated(named_results)
+                modulated_rules: List[str] = []
+                if is_applied:
+                    results, modulated_rules = apply_trust(rules_defs, results, trust_entry)
+                    named_results = {rule_def["name"]: result for rule_def, result in zip(rules_defs, results)}
+                trust_record = build_trust_record(trust_entry, modulated_rules, is_applied)
+
             total_score = policy.aggregate(rules_defs, results)
             base_verdict = policy.verdict_for(total_score)
             verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
@@ -1324,8 +1358,12 @@ class IrisManager(TaskTrackingMixin):
             verdict, quality_reasons = cap_verdict(verdict, quality)
             evaluations.append(ContextEvaluation(
                 context_type=context_type, verdict=verdict, total_score=total_score,
-                gate_reasons=gate_reasons + quality_reasons, results=results, quality=quality,
+                gate_reasons=gate_reasons + quality_reasons + (
+                    [describe_trust_record(trust_record)] if trust_record else []
+                ),
+                results=results, quality=quality,
                 coverage=assess_coverage(evaluated_context, rules_defs),
+                trust_applied=trust_record,
             ))
 
         return evaluations
@@ -1409,6 +1447,7 @@ class IrisManager(TaskTrackingMixin):
                 failed_rules=winner.quality.failed_rules or None, detector_version=detector,
                 winning_context=winner.context_type, winning_reason=winning_reason,
                 secondary_context=secondary_summary,
+                trust_applied=winner.trust_applied,
                 confidence=confidence.level if confidence else None,
                 coverage=winner.coverage or None,
                 uncertainty_reasons=confidence.reasons if confidence else None,

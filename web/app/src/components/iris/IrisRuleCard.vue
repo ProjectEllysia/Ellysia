@@ -280,6 +280,8 @@ function formatDetailValue(v) {
   border: 1px solid rgba(217, 108, 108, 0.15);
 }
 
+/* Regla neutralizada por una excepción de confianza del usuario. */
+.verdict-chip--trusted,
 .verdict-chip--bestguess,
 .verdict-chip--policy {
   background: var(--info-dim);
