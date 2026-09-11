@@ -75,6 +75,30 @@ export function classifyIntake(file, capabilities) {
   }
 }
 
+/** Modos de análisis que acepta `POST /iris/analyze` en su campo `mode`. */
+export const MODE_HEADERS = 'headers'
+export const MODE_MESSAGE = 'message'
+
+/**
+ * Cuerpo de `POST /iris/analyze` para el modo que eligió el usuario.
+ *
+ * El modo viaja explícito y solo se envía el campo de ese modo: el servidor
+ * valida únicamente lo que va a analizar, así que elegir «solo cabeceras»
+ * sobre un `.eml` enorme no puede acabar en un rechazo por el tamaño de un
+ * mensaje que no se usa. El modo completo sin mensaje cargado cae a cabeceras
+ * en vez de enviar una petición que el servidor rechazaría.
+ *
+ * @param {{mode: string, headers: string, message?: string|null, title?: string}} input
+ * @returns {{mode: string, headers?: string, message?: string, title?: string}}
+ */
+export function buildSubmission({ mode, headers, message, title }) {
+  const body = mode === MODE_MESSAGE && message
+    ? { mode: MODE_MESSAGE, message }
+    : { mode: MODE_HEADERS, headers }
+  if (title) body.title = title
+  return body
+}
+
 /** Tamaño legible para el aviso que ve el usuario ("10 MB"). */
 export function formatByteLimit(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return ''

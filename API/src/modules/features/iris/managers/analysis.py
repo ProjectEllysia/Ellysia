@@ -63,7 +63,9 @@ from ..services.contexts import (
 )
 from ..services.scoring import ScoringPolicy, current_policy
 from ..services.quality import (
+    AnalysisMode,
     ConfidenceAssessment,
+    body_dependent_rule_names,
     assess_confidence,
     assess_coverage,
     assess_quality,
@@ -330,13 +332,30 @@ class IrisManager(TaskTrackingMixin):
         el módulo, para que un cambio vía ``PUT /system`` surta efecto sin
         reiniciar (mismo patrón que ``AnalyzeRequestSchema.validate_max_size``,
         que es la validación que este endpoint describe).
+
+        Publica también lo que la interfaz necesita para que el usuario elija
+        el modo sabiendo qué implica: qué reglas se quedan sin nada que mirar
+        en modo cabeceras y el aviso de que el modo completo puede incluir
+        datos sensibles.
+
+        Returns:
+            dict: ``maxMessageBytes``, ``minHeaders``, ``analysisModes``
+                (valores de ``AnalysisMode``), ``headersOnlyUncoveredRules``,
+                ``fullMessageNotice`` y ``verdictThresholds``.
         """
         config = CR.iris_config()
         policy = current_policy()
         return {
             "maxMessageBytes": config.max_message_bytes,
             "minHeaders": config.min_headers,
-            "analysisModes": ["headers", "message"],
+            "analysisModes": [mode.value for mode in AnalysisMode],
+            "headersOnlyUncoveredRules": body_dependent_rule_names(iris_rules.get_rules()),
+            "fullMessageNotice": (
+                "El mensaje completo incluye el cuerpo y los adjuntos, que pueden contener datos "
+                "sensibles: personales, confidenciales o de terceros. Iris lo guarda cifrado y "
+                f"purga ese contenido a los {config.raw_message_retention_days} días; el resultado "
+                "del análisis se conserva."
+            ),
             "verdictThresholds": {
                 "legitimate": policy.legitimate_threshold,
                 "suspicious": policy.suspicious_threshold,

@@ -242,8 +242,8 @@ onMounted(async () => {
   }
 })
 
-async function handleSubmit({ headers, message, title }) {
-  const id = await store.submitAnalysis({ headers, message, title })
+async function handleSubmit(submission) {
+  const id = await store.submitAnalysis(submission)
   if (id) {
     prefill.value = null
     formKey.value++

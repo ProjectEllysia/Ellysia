@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Dict, List
 
 #: Valor de ``verdict`` con el que el motor marca una regla que lanzó una
@@ -155,12 +156,35 @@ def assess_coverage(context: Any, rules_defs: List[dict]) -> Dict[str, Any]:
     has_content = bool(context.body_text or context.body_html or context.attachments)
     if has_content:
         return {"mode": COVERAGE_FULL_MESSAGE, "uncoveredRules": []}
-    return {
-        "mode": COVERAGE_HEADERS_ONLY,
-        "uncoveredRules": [
-            rule_def["name"] for rule_def in rules_defs if rule_def.get("is_body_dependent")
-        ],
-    }
+    return {"mode": COVERAGE_HEADERS_ONLY, "uncoveredRules": body_dependent_rule_names(rules_defs)}
+
+
+class AnalysisMode(StrEnum):
+    """Qué parte del correo pide analizar el usuario (``POST /iris/analyze``, campo ``mode``).
+
+    Attributes:
+        HEADERS: Solo el bloque de cabeceras.
+        MESSAGE: El ``.eml`` completo, con cuerpo, enlaces y adjuntos.
+    """
+    HEADERS = "headers"
+    MESSAGE = "message"
+
+
+def body_dependent_rule_names(rules_defs: List[dict]) -> List[str]:
+    """Reglas que no tienen nada que inspeccionar en un análisis de solo cabeceras.
+
+    Es la misma lista que ``assess_coverage`` guarda en ``uncoveredRules`` de un
+    análisis de solo cabeceras, y la que ``GET /iris/capabilities`` publica
+    para que la interfaz la enseñe **antes** de enviar, al elegir el modo.
+
+    Args:
+        rules_defs: Catálogo de reglas; se usa el flag ``is_body_dependent``.
+
+    Returns:
+        List[str]: Nombres de las reglas de cuerpo, enlaces y adjuntos, en el
+            orden del catálogo.
+    """
+    return [rule_def["name"] for rule_def in rules_defs if rule_def.get("is_body_dependent")]
 
 
 @dataclass(frozen=True)

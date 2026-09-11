@@ -15,6 +15,9 @@
 
 import {
   FALLBACK_MAX_MESSAGE_BYTES,
+  MODE_HEADERS,
+  MODE_MESSAGE,
+  buildSubmission,
   classifyIntake,
   formatByteLimit,
   isEmlFile,
@@ -97,6 +100,23 @@ eq('10 MB', formatByteLimit(10 * MB), '10 MB')
 eq('20 MB', formatByteLimit(20 * MB), '20 MB')
 eq('decimal por debajo de 10', formatByteLimit(2.5 * MB), '2.5 MB')
 eq('sin límite no hay texto', formatByteLimit(0), '')
+
+console.log('\nbuildSubmission — el modo viaja explícito')
+eq('modo cabeceras envía solo las cabeceras',
+  buildSubmission({ mode: MODE_HEADERS, headers: 'From: a', message: 'From: a\n\ncuerpo' }),
+  { mode: 'headers', headers: 'From: a' })
+eq('modo completo envía solo el mensaje',
+  buildSubmission({ mode: MODE_MESSAGE, headers: 'From: a', message: 'From: a\n\ncuerpo', title: 'T' }),
+  { mode: 'message', message: 'From: a\n\ncuerpo', title: 'T' })
+// Sin mensaje cargado (fichero truncado por tamaño o cabeceras pegadas a mano)
+// el modo completo no tiene nada que enviar: cae a cabeceras en vez de mandar
+// una petición que el servidor rechazaría.
+eq('modo completo sin mensaje cae a cabeceras',
+  buildSubmission({ mode: MODE_MESSAGE, headers: 'From: a', message: null }),
+  { mode: 'headers', headers: 'From: a' })
+eq('sin título no se envía la clave',
+  Object.keys(buildSubmission({ mode: MODE_HEADERS, headers: 'From: a', title: '' })),
+  ['mode', 'headers'])
 
 console.log(`\n${passed} pasados, ${failed} fallidos`)
 process.exit(failed === 0 ? 0 : 1)
