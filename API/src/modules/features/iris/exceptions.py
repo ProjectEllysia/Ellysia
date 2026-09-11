@@ -101,6 +101,13 @@ class IrisTrustedSenderNotFoundError(EntityNotFoundError, IrisError):
     id_field = "trusted_sender_id"
 
 
+class IrisSavedViewNotFoundError(EntityNotFoundError, IrisError):
+    """La vista guardada no existe o no es del usuario (mismo error para los dos)."""
+    entity_label = "Vista guardada"
+    entity_is_feminine = True
+    id_field = "view_id"
+
+
 class IrisMailboxInvalidProviderError(IrisError):
     """Raised when connecting to an unsupported mailbox provider."""
     default_code = ErrorCode.VALIDATION_ERROR

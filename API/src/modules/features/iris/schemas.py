@@ -136,17 +136,20 @@ class AnalysisIdQuerySchema(Schema):
     id = fields.Integer(required=True)
 
 
-class ResultsQuerySchema(Schema):
-    """Query parameters for the paginated results list.
+class IrisTriageFiltersSchema(Schema):
+    """Filtros y orden del historial de análisis.
 
-    ``search``/``verdict``/``status``/``source`` are optional filters (all
-    default to "no filter" so existing callers are unaffected); ``sort_by``/
-    ``sort_dir`` control server-side ordering — previously the endpoint only
-    ever returned ``created_at DESC``, so any client-side "sort by score"
-    only reordered whatever page happened to be loaded.
+    Son los parámetros de ``GET /iris/results`` sin la paginación, y lo que
+    guarda una vista guardada. Todos son opcionales y por defecto no filtran:
+
+    - ``search``: subcadena del título.
+    - ``verdict``, ``status``, ``source``: igualdad exacta.
+    - ``tag``: etiqueta exacta del analista.
+    - ``ioc``: un dominio, URL, IP, dirección o hash; se admite desactivado
+      (``hxxp``, ``[.]``) y se busca en el índice de IOCs.
+    - ``review``: ``pending`` (terminado y sin corregir) o ``reviewed``.
+    - ``sort_by``/``sort_dir``: orden en servidor.
     """
-    page = fields.Integer(load_default=1, validate=validate.Range(min=1))
-    per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
     search = fields.String(load_default=None, validate=validate.Length(max=120))
     verdict = fields.String(load_default=None,
                              validate=validate.OneOf(["Legitimate", "Suspicious", "Phishing"]))
@@ -156,6 +159,15 @@ class ResultsQuerySchema(Schema):
     sort_by = fields.String(load_default="date",
                              validate=validate.OneOf(["date", "score", "verdict", "title", "status"]))
     sort_dir = fields.String(load_default="desc", validate=validate.OneOf(["asc", "desc"]))
+    tag = fields.String(load_default=None, validate=validate.Length(max=40))
+    ioc = fields.String(load_default=None, validate=validate.Length(max=2048))
+    review = fields.String(load_default=None, validate=validate.OneOf(["pending", "reviewed"]))
+
+
+class ResultsQuerySchema(IrisTriageFiltersSchema):
+    """Parámetros de ``GET /iris/results``: los filtros del historial más la página."""
+    page = fields.Integer(load_default=1, validate=validate.Range(min=1))
+    per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
 
 
 class AnalyzeResponseSchema(Schema):
@@ -388,6 +400,7 @@ class AnalysisDetailResponseSchema(Schema):
     recommendations = fields.List(fields.String())
     latestFeedback = fields.Nested(IrisFeedbackItemSchema, load_default=None, allow_none=True)
     trustApplied = fields.Dict(load_default=None, allow_none=True)
+    tags = fields.List(fields.String(), load_default=list)
 
 
 class AnalysisListItemSchema(Schema):
@@ -405,6 +418,8 @@ class AnalysisListItemSchema(Schema):
     connectionId = fields.Integer(load_default=None)
     provider = fields.String(load_default=None)
     accountEmail = fields.String(load_default=None)
+    tags = fields.List(fields.String(), load_default=list)
+    reviewed = fields.Boolean(load_default=False)
 
 
 class VerdictThresholdsSchema(Schema):
@@ -858,3 +873,55 @@ class IrisTrustedSenderListResponseSchema(Schema):
     """Excepciones de confianza del usuario, de la más reciente a la más antigua."""
     trustedSenders = fields.List(fields.Nested(IrisTrustedSenderItemSchema))
     total = fields.Integer()
+
+
+class IrisSavedViewRequestSchema(Schema):
+    """Cuerpo de ``POST /iris/triage/views``: nombre y filtros a guardar."""
+    name = fields.String(required=True, validate=validate.Length(min=1, max=60))
+    filters = fields.Nested(IrisTriageFiltersSchema, load_default=dict)
+
+
+class IrisSavedViewItemSchema(Schema):
+    """Una vista guardada: ``filters`` usa las claves de ``GET /iris/results``."""
+    viewId = fields.Integer()
+    name = fields.String()
+    filters = fields.Dict()
+    createdAt = fields.String()
+
+
+class IrisSavedViewListResponseSchema(Schema):
+    """Vistas guardadas del usuario, por nombre."""
+    views = fields.List(fields.Nested(IrisSavedViewItemSchema))
+
+
+class IrisSavedViewDeleteResponseSchema(Schema):
+    """Confirmación tras borrar una vista guardada."""
+    message = fields.String()
+    viewId = fields.Integer()
+
+
+class IrisAnalysisTagsRequestSchema(Schema):
+    """Cuerpo de ``PUT /iris/results/<id>/tags``: el conjunto completo de etiquetas.
+
+    El tope de la lista es solo contra abusos; el límite real por análisis lo
+    aplica el manager tras normalizar (quitar vacías y duplicadas).
+    """
+    tags = fields.List(fields.String(validate=validate.Length(max=200)), required=True,
+                       validate=validate.Length(max=50))
+
+
+class IrisAnalysisTagsResponseSchema(Schema):
+    """Etiquetas que quedan en un análisis, ya normalizadas."""
+    analysisId = fields.Integer()
+    tags = fields.List(fields.String())
+
+
+class IrisTagCountSchema(Schema):
+    """Una etiqueta del usuario y en cuántos análisis aparece."""
+    name = fields.String()
+    count = fields.Integer()
+
+
+class IrisTagListResponseSchema(Schema):
+    """Etiquetas del usuario, de la más usada a la menos."""
+    tags = fields.List(fields.Nested(IrisTagCountSchema))

@@ -36,7 +36,7 @@ import src.modules.system.config_reading as CR
 
 from .managers import (
     IrisFeedbackManager, IrisManager, IrisReportManager, IrisMailboxManager,
-    IrisNotificationPreferenceManager, IrisReplayManager, IrisTrustPolicyManager,
+    IrisNotificationPreferenceManager, IrisReplayManager, IrisTriageManager, IrisTrustPolicyManager,
 )
 from .exceptions import (
     IrisAnalysisNotFoundError,
@@ -44,6 +44,7 @@ from .exceptions import (
     IrisInvalidInputError,
     IrisMailboxConnectionNotFoundError,
     IrisMailboxOAuthStateError,
+    IrisSavedViewNotFoundError,
     IrisTrustedSenderNotFoundError,
 )
 from .schemas import (
@@ -92,6 +93,13 @@ from .schemas import (
     IrisTrustedSenderListResponseSchema,
     IrisTrustedSenderRequestSchema,
     IrisTrustedSendersQuerySchema,
+    IrisAnalysisTagsRequestSchema,
+    IrisAnalysisTagsResponseSchema,
+    IrisSavedViewDeleteResponseSchema,
+    IrisSavedViewItemSchema,
+    IrisSavedViewListResponseSchema,
+    IrisSavedViewRequestSchema,
+    IrisTagListResponseSchema,
 )
 
 
@@ -283,6 +291,84 @@ def revoke_trusted_sender(trusted_sender_id: int):
     return entry
 
 
+@iris_blp.get("/triage/views")
+@iris_blp.response(200, IrisSavedViewListResponseSchema, description="Saved triage views")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(logger=logger)
+def list_saved_views():
+    """Vistas guardadas del historial de análisis del usuario"""
+    user = get_current_user()
+    return {"views": IrisTriageManager().list_views(user.id)}
+
+
+@iris_blp.post("/triage/views")
+@iris_blp.arguments(IrisSavedViewRequestSchema)
+@iris_blp.response(201, IrisSavedViewItemSchema, description="Saved view created")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Duplicate name or too many views")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisExecutionError, logger=logger)
+def create_saved_view(data):
+    """Guardar con nombre una combinación de filtros del historial"""
+    user = get_current_user()
+    return IrisTriageManager().create_view(user.id, data["name"], data["filters"])
+
+
+@iris_blp.delete("/triage/views/<int:view_id>")
+@iris_blp.response(200, IrisSavedViewDeleteResponseSchema, description="Saved view deleted")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="View not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisSavedViewNotFoundError, logger=logger)
+def delete_saved_view(view_id: int):
+    """Borrar una vista guardada"""
+    user = get_current_user()
+    IrisTriageManager().delete_view(view_id, user.id)
+    return {"message": "Vista borrada", "viewId": view_id}
+
+
+@iris_blp.get("/tags")
+@iris_blp.response(200, IrisTagListResponseSchema, description="Tags in use and how many analyses carry each")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(logger=logger)
+def list_tags():
+    """Etiquetas que usa el usuario, de la más usada a la menos"""
+    user = get_current_user()
+    return {"tags": IrisTriageManager().list_tags(user.id)}
+
+
+@iris_blp.put("/results/<int:analysis_id>/tags")
+@iris_blp.arguments(IrisAnalysisTagsRequestSchema)
+@iris_blp.response(200, IrisAnalysisTagsResponseSchema, description="Tags replaced")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Tag too long or too many tags")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def set_analysis_tags(data, analysis_id: int):
+    """Sustituir las etiquetas de un análisis (no cambia el análisis)"""
+    user = get_current_user()
+    tags = IrisTriageManager().set_tags(analysis_id, user.id, data["tags"])
+    return {"analysisId": analysis_id, "tags": tags}
+
+
 @iris_blp.get("/retention-policy")
 @iris_blp.response(200, IrisRetentionReportResponseSchema, description="Retention policy and current status")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
@@ -365,6 +451,7 @@ def list_analyses(args):
     results, total, thresholds = manager.get_analyses_for_user(
         user.id, page, per_page,
         search=args["search"], verdict=args["verdict"], status=args["status"], source=args["source"],
+        tag=args["tag"], ioc=args["ioc"], review=args["review"],
         sort_by=args["sort_by"], sort_dir=args["sort_dir"],
     )
 

@@ -41,8 +41,14 @@ from ..exceptions import (
     IrisInvalidStateError,
     IrisRawMessagePurgedError,
 )
-from ..model import IrisAnalysis, IrisRuleResult
-from ..repositories import IrisAnalysisRepository, IrisRuleResultRepository
+from ..model import IrisAnalysis, IrisIndicator, IrisRuleResult
+from ..repositories import (
+    IrisAnalysisRepository,
+    IrisAnalystFeedbackRepository,
+    IrisIndicatorRepository,
+    IrisRuleResultRepository,
+)
+from ..services.indicators import extract_indicators, indicator_rows, refang
 from ..services.rules import iris_rules, RuleResult
 from ..services.text import extract_domain, is_free_provider, url_host
 from ..services import parse_raw_message
@@ -160,8 +166,6 @@ class IrisManager(TaskTrackingMixin):
     EXTERNAL_ID_PREFIX = "iris-analysis:"
     TASK_CATEGORY = "iris.analyze"
     _TOP_SIGNALS_LIMIT = 5
-
-    _EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+")
 
     AI_SUMMARY_EXTERNAL_ID_PREFIX = "iris-ai-summary:"
 
@@ -513,6 +517,7 @@ class IrisManager(TaskTrackingMixin):
             "recommendations": recommendations,
             "latestFeedback": latest_feedback,
             "trustApplied": analysis.trust_applied,
+            "tags": [tag.name for tag in analysis.tags],
         }
 
     @classmethod
@@ -625,48 +630,10 @@ class IrisManager(TaskTrackingMixin):
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
         context = _winning_message_context(analysis)
-
-        domains: set[str] = set()
-        emails: set[str] = set()
-        urls: set[str] = set()
-        ips: set[str] = set()
-        hashes: set[str] = set()
-
-        for header_name in ("from", "reply-to", "return-path"):
-            raw_value = context.headers.get(header_name, "")
-            domain = extract_domain(raw_value)
-            if domain:
-                domains.add(domain)
-            email_match = self._EMAIL_RE.search(raw_value)
-            if email_match:
-                emails.add(email_match.group(0).lower())
-
-        for link in context.links:
-            href = (link.href or "").strip()
-            if not href:
-                continue
-            urls.add(href)
-            host = url_host(href)
-            if host:
-                domains.add(host)
-
-        for line in context.received_headers:
-            hop = parse_received_line(line)
-            if hop.get("fromIp"):
-                ips.add(hop["fromIp"])
-
-        for att in context.attachments:
-            if att.content:
-                hashes.add(hashlib.sha256(att.content).hexdigest())
-
         return {
             "analysisId": analysis.id,
             "contextType": analysis.winning_context,
-            "domains": sorted(domains),
-            "urls": sorted(urls),
-            "ips": sorted(ips),
-            "emails": sorted(emails),
-            "hashes": sorted(hashes),
+            **extract_indicators(context),
         }
 
     def export_analysis(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
@@ -982,6 +949,7 @@ class IrisManager(TaskTrackingMixin):
         self, user_id: int, page: int = 1, per_page: int = 10, *,
         search: str | None = None, verdict: str | None = None,
         status: str | None = None, source: str | None = None,
+        tag: str | None = None, ioc: str | None = None, review: str | None = None,
         sort_by: str = "date", sort_dir: str = "desc",
     ):
         """Return a paginated, formatted list of analyses for a user.
@@ -990,8 +958,10 @@ class IrisManager(TaskTrackingMixin):
             user_id:  Owner of the analyses.
             page:     1‑based page number.
             per_page: Items per page.
-            search/verdict/status/source: Optional filters — see
+            search/verdict/status/source/tag/review: Optional filters — see
                 ``IrisAnalysisRepository.get_by_user_paginated``.
+            ioc: Indicador a buscar; se admite desactivado (``hxxp``,
+                ``[.]``) y se normaliza con ``services/indicators.refang``.
             sort_by/sort_dir: Server-side ordering — see same.
 
         Returns:
@@ -1001,7 +971,11 @@ class IrisManager(TaskTrackingMixin):
         items, total = build_repository(IrisAnalysisRepository).get_by_user_paginated(
             user_id, page, per_page,
             search=search, verdict=verdict, status=status, source=source,
+            tag=tag, ioc=refang(ioc) if ioc else None, review=review,
             sort_by=sort_by, sort_dir=sort_dir,
+        )
+        reviewed_ids = build_repository(IrisAnalystFeedbackRepository).get_reviewed_ids(
+            [analysis_record.id for analysis_record in items]
         )
         policy = current_policy()
         thresholds = {
@@ -1023,6 +997,8 @@ class IrisManager(TaskTrackingMixin):
                 "connectionId": analysis_record.connection_id,
                 "provider": analysis_record.connection.provider if analysis_record.connection else None,
                 "accountEmail": analysis_record.connection.account_email if analysis_record.connection else None,
+                "tags": [tag.name for tag in analysis_record.tags],
+                "reviewed": analysis_record.id in reviewed_ids,
             }
             for analysis_record in items
         ]
@@ -1171,7 +1147,9 @@ class IrisManager(TaskTrackingMixin):
                     secondary=secondary,
                     winning_reason=winning_reason,
                     confidence=confidence,
-                    scoring_policy=policy
+                    scoring_policy=policy,
+                    indicators=indicator_rows(extract_indicators(
+                        context_of_type(context, winner.context_type))),
                 )
             except Exception as e:
                 logger.error(f"Analysis {analysis_id} failed: {e}", exc_info=True)
@@ -1393,7 +1371,8 @@ class IrisManager(TaskTrackingMixin):
                                    secondary: Optional[ContextEvaluation] = None,
                                    winning_reason: Optional[str] = None,
                                    confidence: Optional[ConfidenceAssessment] = None,
-                                   scoring_policy: Optional[ScoringPolicy] = None) -> None:
+                                   scoring_policy: Optional[ScoringPolicy] = None,
+                                   indicators: Optional[List[tuple]] = None) -> None:
         """Persiste las filas de regla y el estado final del análisis en una
         única transacción.
 
@@ -1428,6 +1407,9 @@ class IrisManager(TaskTrackingMixin):
             scoring_policy: Política con la que se puntuó; se guarda su
                 snapshot y su versión. Por defecto ``None``: esas columnas
                 quedan a NULL.
+            indicators: Pares ``(kind, value)`` del índice de IOCs del
+                contexto ganador (``services/indicators.indicator_rows``).
+                Por defecto ``None``: no se indexa nada.
         """
         with UnitOfWork() as uow:
             rule_repo = IrisRuleResultRepository(uow)
@@ -1448,6 +1430,10 @@ class IrisManager(TaskTrackingMixin):
                         evidence=rule_result.evidence or None,
                         evidence_unavailable_reason=rule_result.evidence_unavailable_reason,
                     ))
+
+            indicator_repo = IrisIndicatorRepository(uow)
+            for kind, value in indicators or []:
+                indicator_repo.save(IrisIndicator(analysis_id=analysis_id, kind=kind, value=value))
 
             secondary_summary = None
             if secondary is not None:

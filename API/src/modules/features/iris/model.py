@@ -137,6 +137,11 @@ class IrisAnalysis(Base):
         feedback: Correcciones del analista sobre este análisis
                  (``IrisAnalystFeedback``), de la más antigua a la más reciente.
                  Nunca modifican el veredicto de esta fila.
+        tags: Etiquetas del analista (``IrisAnalysisTag``), por nombre.
+                 Tampoco modifican el análisis.
+        indicators: Índice de IOCs del contexto ganador (``IrisIndicator``).
+                 Se rellena al terminar el análisis y sobrevive a la purga
+                 del raw por retención.
         connection_id: FK to the IrisMailboxConnection that ingested this
                  message automatically; NULL for manual submissions (the
                  original, still-default flow).
@@ -202,6 +207,15 @@ class IrisAnalysis(Base):
     feedback = relationship(
         "IrisAnalystFeedback", back_populates="analysis",
         order_by="IrisAnalystFeedback.created_at",
+        cascade="all, delete-orphan",
+    )
+    tags = relationship(
+        "IrisAnalysisTag", back_populates="analysis",
+        order_by="IrisAnalysisTag.name",
+        cascade="all, delete-orphan",
+    )
+    indicators = relationship(
+        "IrisIndicator", back_populates="analysis",
         cascade="all, delete-orphan",
     )
 
@@ -738,4 +752,100 @@ class IrisTrustedSender(Base):
 
     __table_args__ = (
         Index("ix_iris_trusted_sender_user_id", "user_id"),
+    )
+
+
+class IrisSavedView(Base):
+    """Combinación de filtros del historial de análisis guardada con nombre.
+
+    Permite volver a una cola de trabajo («phishing sin revisar») sin
+    reconstruir cada filtro. ``filters`` usa las mismas claves que los
+    parámetros de ``GET /iris/results``, validadas por
+    ``IrisTriageFiltersSchema``.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño; ``ondelete="CASCADE"``, así que el
+                 borrado de la cuenta se la lleva sin que ``users`` tenga que
+                 conocer esta tabla.
+        name: Nombre visible, único por usuario (hasta 60 caracteres).
+        filters: Filtros y orden: ``search``, ``verdict``, ``status``,
+                 ``source``, ``tag``, ``ioc``, ``review``, ``sort_by`` y
+                 ``sort_dir``; solo los que filtran.
+        created_at: Cuándo se guardó.
+        user: Relación al ``User`` dueño.
+    """
+    __tablename__ = "IrisSavedView"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(60), nullable=False)
+    filters = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_iris_saved_view_user_name"),
+    )
+
+
+class IrisAnalysisTag(Base):
+    """Etiqueta que un analista pone a un análisis para agruparlo.
+
+    Es una fila aparte y no una columna del análisis: etiquetar no modifica
+    ``IrisAnalysis``, que sigue siendo lo que decidió Iris.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis`` etiquetado; ``ondelete="CASCADE"``.
+        name: Etiqueta normalizada (minúsculas, hasta 40 caracteres); única
+                 por análisis.
+        created_at: Cuándo se puso.
+        analysis: Relación inversa a ``IrisAnalysis``.
+    """
+    __tablename__ = "IrisAnalysisTag"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(40), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    analysis = relationship("IrisAnalysis", back_populates="tags")
+
+    __table_args__ = (
+        UniqueConstraint("analysis_id", "name", name="uq_iris_analysis_tag_analysis_name"),
+        Index("ix_iris_analysis_tag_name", "name"),
+    )
+
+
+class IrisIndicator(Base):
+    """Un IOC de un análisis, indexado para buscarlo.
+
+    El raw se guarda cifrado y no se puede consultar con SQL, y la retención
+    lo purga pasado un plazo. Este índice conserva los indicadores del contexto
+    ganador —dominios, URLs, IPs, direcciones y hashes de adjuntos, ver
+    ``services/indicators.py``— para responder «¿qué análisis tocan este
+    dominio?» también después de la purga.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis``; ``ondelete="CASCADE"``.
+        kind: ``domain``, ``url``, ``ip``, ``email`` o ``hash``.
+        value: El indicador en minúsculas, recortado a
+                 ``services/indicators.MAX_INDICATOR_LENGTH``.
+        analysis: Relación inversa a ``IrisAnalysis``.
+    """
+    __tablename__ = "IrisIndicator"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(16), nullable=False)
+    value = Column(String(2048), nullable=False)
+
+    analysis = relationship("IrisAnalysis", back_populates="indicators")
+
+    __table_args__ = (
+        Index("ix_iris_indicator_analysis_id", "analysis_id"),
+        Index("ix_iris_indicator_value", "value"),
     )
