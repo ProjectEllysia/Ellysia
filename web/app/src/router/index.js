@@ -79,6 +79,12 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/iris/confianza',
+    name: 'IrisTrust',
+    component: () => import('@/views/IrisTrustView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     path: '/acheron',
     name: 'AcheronHub',
     component: () => import('@/views/AcheronHubView.vue'),
