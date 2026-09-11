@@ -60,7 +60,7 @@ def _dmarc_is_conclusive(auth_lower: str) -> bool:
 
 
 @iris_rules.register(
-    name="SPF", evidence_headers=("received-spf", "authentication-results"), category="authentication", family="auth",
+    name="SPF", rule_id="iris.auth.spf", severity="medium", evidence_headers=("received-spf", "authentication-results"), category="authentication", family="auth",
     description="Verifica que el servidor remitente esté autorizado por el SPF del dominio",
 )
 def check_spf(headers: dict) -> RuleResult:
@@ -157,7 +157,7 @@ def check_spf(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="DKIM", evidence_headers=("authentication-results", "dkim-signature"), category="authentication", family="auth",
+    name="DKIM", rule_id="iris.auth.dkim", severity="medium", evidence_headers=("authentication-results", "dkim-signature"), category="authentication", family="auth",
     description="Verifica la firma DKIM del correo",
 )
 def check_dkim(headers: dict) -> RuleResult:
@@ -208,7 +208,7 @@ def check_dkim(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="DMARC", evidence_headers=("authentication-results",), category="authentication", family="auth",
+    name="DMARC", rule_id="iris.auth.dmarc", severity="high", evidence_headers=("authentication-results",), category="authentication", family="auth",
     description="Verifica la política DMARC del dominio remitente",
 )
 def check_dmarc(headers: dict) -> RuleResult:
@@ -297,7 +297,7 @@ def _spf_mailfrom_domain(headers: dict) -> str | None:
 
 
 @iris_rules.register(
-    name="Domain Alignment", evidence_headers=("from", "authentication-results"), category="authentication", family="auth",
+    name="Domain Alignment", rule_id="iris.auth.domain_alignment", severity="medium", evidence_headers=("from", "authentication-results"), category="authentication", family="auth",
     description="Comprueba que el dominio autenticado por SPF/DKIM coincide con el dominio del remitente (alineación DMARC)",
 )
 def check_domain_alignment(headers: dict) -> RuleResult:
@@ -394,7 +394,7 @@ _ARC_CV_RE = re.compile(r"\bcv=(\w+)", re.IGNORECASE)
 
 
 @iris_rules.register(
-    name="ARC Chain", evidence_headers=("arc-seal", "arc-authentication-results"), category="authentication",
+    name="ARC Chain", rule_id="iris.auth.arc_chain", severity="low", evidence_headers=("arc-seal", "arc-authentication-results"), category="authentication",
     description=(
         "Evalúa la validez declarada (cv=) de la cadena ARC (Authenticated "
         "Received Chain, RFC 8617) y si la validó un verificador de confianza"
@@ -501,7 +501,7 @@ _AUTHSERV_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\.[a-z]{2,}$")
 
 
 @iris_rules.register(
-    name="Auth Results Provenance", evidence_headers=("authentication-results",), category="authentication", family="auth",
+    name="Auth Results Provenance", rule_id="iris.auth.auth_results_provenance", severity="high", evidence_headers=("authentication-results",), category="authentication", family="auth",
     description=(
         "Comprueba que el authserv-id de Authentication-Results pertenezca a "
         "algún host `by` de la propia cadena Received del mensaje -- una "

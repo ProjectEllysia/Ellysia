@@ -44,7 +44,7 @@ from ..parsers import decode_mime_words
 
 
 @iris_rules.register(
-    name="From header check", evidence_headers=("from",), category="header_analysis", family="identity",
+    name="From header check", rule_id="iris.identity.from_header", severity="low", evidence_headers=("from",), category="header_analysis", family="identity",
     description="Verifica que la cabecera From esté presente y no esté vacía",
 )
 def check_from_header(headers: dict) -> RuleResult:
@@ -79,7 +79,7 @@ def _domain_matches_trusted(domain: str, trusted_domains: tuple[str, ...]) -> bo
 
 
 @iris_rules.register(
-    name="Display Name Spoofing", evidence_headers=("from",), category="header_analysis", family="identity",
+    name="Display Name Spoofing", rule_id="iris.identity.display_name_spoofing", severity="high", mitre_techniques=("T1656",), evidence_headers=("from",), category="header_analysis", family="identity",
     description="Detecta si el nombre del remitente suplanta a una marca conocida pero el dominio del correo no pertenece a ella",
 )
 def check_display_name_spoof(headers: dict) -> RuleResult:
@@ -199,7 +199,7 @@ def _is_random_local(local: str) -> bool:
 
 
 @iris_rules.register(
-    name="Display Name Email Mismatch", evidence_headers=("from",),
+    name="Display Name Email Mismatch", rule_id="iris.identity.display_name_email_mismatch", severity="medium", mitre_techniques=("T1656",), evidence_headers=("from",),
     category="header_analysis", family="identity",
     description=(
         "Detecta cuando el display name suplanta a una organización pero "
@@ -246,7 +246,7 @@ def check_display_name_email_mismatch(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Lookalike Sender Domain", evidence_headers=("from",), category="header_analysis", family="identity",
+    name="Lookalike Sender Domain", rule_id="iris.identity.lookalike_sender_domain", severity="critical", mitre_techniques=("T1583.001", "T1656",), evidence_headers=("from",), category="header_analysis", family="identity",
     description="Detecta si el dominio real del remitente imita a una marca conocida (typosquatting, homóglifos, cousin domain o punycode/IDN)",
 )
 def check_lookalike_domain(headers: dict) -> RuleResult:
@@ -340,7 +340,7 @@ def _is_trusted_brand_domain(domain: str) -> bool:
 
 
 @iris_rules.register(
-    name="Subdomain Impersonation", evidence_headers=("from",),
+    name="Subdomain Impersonation", rule_id="iris.identity.subdomain_impersonation", severity="high", mitre_techniques=("T1583.001",), evidence_headers=("from",),
     category="header_analysis", family="identity",
     description=(
         "Detecta trucos de subdominio donde un nombre de marca conocido aparece "
@@ -486,7 +486,7 @@ def _find_typosquats(text: str) -> list[dict]:
 
 
 @iris_rules.register(
-    name="Misspelled Brand Names", evidence_headers=("from", "subject"), category="content_analysis", family="identity",
+    name="Misspelled Brand Names", rule_id="iris.identity.misspelled_brand_names", severity="medium", mitre_techniques=("T1656",), evidence_headers=("from", "subject"), category="content_analysis", family="identity",
     description="Detecta homóglifos y errores tipográficos de marcas conocidas en el asunto y nombre del remitente",
 )
 def check_misspelled_brands(headers: dict) -> RuleResult:
@@ -536,7 +536,7 @@ def check_misspelled_brands(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Suspicious TLD", evidence_headers=("from", "reply-to", "return-path"), category="header_analysis", family="identity",
+    name="Suspicious TLD", rule_id="iris.identity.suspicious_tld", severity="low", evidence_headers=("from", "reply-to", "return-path"), category="header_analysis", family="identity",
     description="Detecta si el dominio del remitente usa TLDs frecuentemente asociados con phishing",
 )
 def check_suspicious_tld(headers: dict) -> RuleResult:
@@ -618,7 +618,7 @@ def _recipient_domain(headers: dict) -> str | None:
 
 
 @iris_rules.register(
-    name="Recipient Domain Lookalike", evidence_headers=("from", "to"),
+    name="Recipient Domain Lookalike", rule_id="iris.identity.recipient_domain_lookalike", severity="critical", mitre_techniques=("T1583.001", "T1656",), evidence_headers=("from", "to"),
     category="header_analysis", family="identity",
     description=(
         "Detecta cuando el dominio del remitente es un typosquat/homoglifo "
@@ -689,7 +689,7 @@ _EMAIL_LIKE_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
 
 
 @iris_rules.register(
-    name="Display Name Foreign Address", evidence_headers=("from",),
+    name="Display Name Foreign Address", rule_id="iris.identity.display_name_foreign_address", severity="high", mitre_techniques=("T1656",), evidence_headers=("from",),
     category="header_analysis", family="identity",
     description=(
         "Detecta cuando el display name del remitente ES una dirección de "

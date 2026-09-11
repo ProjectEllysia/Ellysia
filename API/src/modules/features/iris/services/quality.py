@@ -86,6 +86,7 @@ def assess_quality(rules_defs: List[dict], results: List[Any]) -> AnalysisQualit
     failed_rules = [
         {
             "name": rule_def["name"],
+            "ruleId": rule_def.get("rule_id") or None,
             "family": rule_def.get("family") or None,
             "category": rule_def.get("category") or None,
         }

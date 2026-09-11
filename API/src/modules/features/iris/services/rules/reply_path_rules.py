@@ -46,7 +46,7 @@ def _is_esp_domain(domain: str | None) -> bool:
 
 
 @iris_rules.register(
-    name="Reply-To check", evidence_headers=("from", "reply-to"), category="header_analysis", family="reply_path",
+    name="Reply-To check", rule_id="iris.reply_path.reply_to_mismatch", severity="medium", evidence_headers=("from", "reply-to"), category="header_analysis", family="reply_path",
     description="Detecta si Reply-To difiere del remitente real",
 )
 def check_reply_to(headers: dict) -> RuleResult:
@@ -129,7 +129,7 @@ def check_reply_to(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Reply-To Free Provider", evidence_headers=("from", "reply-to", "return-path"), category="header_analysis", family="reply_path",
+    name="Reply-To Free Provider", rule_id="iris.reply_path.reply_to_free_provider", severity="medium", evidence_headers=("from", "reply-to", "return-path"), category="header_analysis", family="reply_path",
     description="Detecta el patrón BEC: remitente con dominio corporativo pero Reply-To/Return-Path apuntando a un correo gratuito",
 )
 def check_reply_to_free_provider(headers: dict) -> RuleResult:
@@ -170,7 +170,7 @@ def check_reply_to_free_provider(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Return-Path mismatch", evidence_headers=("return-path", "from"), category="header_analysis", family="reply_path",
+    name="Return-Path mismatch", rule_id="iris.reply_path.return_path_mismatch", severity="low", evidence_headers=("return-path", "from"), category="header_analysis", family="reply_path",
     description="Detecta si el dominio en Return-Path difiere del remitente visible",
 )
 def check_return_path(headers: dict) -> RuleResult:
@@ -263,7 +263,7 @@ def _triangulation_would_fire(headers: dict) -> bool:
 
 
 @iris_rules.register(
-    name="From Reply-To Return-Path Triangulation", evidence_headers=("from", "reply-to", "return-path"),
+    name="From Reply-To Return-Path Triangulation", rule_id="iris.reply_path.triangulation", severity="medium", evidence_headers=("from", "reply-to", "return-path"),
     category="header_analysis", family="reply_path",
     description=(
         "Detecta mensajes donde From, Reply-To y Return-Path apuntan a tres "

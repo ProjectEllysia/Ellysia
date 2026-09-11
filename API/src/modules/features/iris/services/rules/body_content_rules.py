@@ -62,7 +62,7 @@ def _score_by_weight(weight: int) -> tuple[float, str, str | None]:
 
 
 @iris_rules.register(
-    name="Alarming Keywords", evidence_headers=("subject", "from"), category="content_analysis", family="content",
+    name="Alarming Keywords", rule_id="iris.content.alarming_keywords", severity="low", evidence_headers=("subject", "from"), category="content_analysis", family="content",
     description="Detecta palabras y frases alarmantes en el asunto y nombre del remitente (inglés/español)",
 )
 def check_alarming_keywords(headers: dict) -> RuleResult:
@@ -180,7 +180,7 @@ def _has_evasive_hidden_text(body_html: str) -> bool:
 
 
 @iris_rules.register(
-    name="Body Content", unanchorable_reason=(
+    name="Body Content", rule_id="iris.content.body_content", severity="medium", unanchorable_reason=(
         "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
     ), is_body_dependent=True, category="content_analysis", family="content",
     description=(
@@ -232,7 +232,7 @@ def check_body_content(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="BEC Wire Transfer Pattern", unanchorable_reason=(
+    name="BEC Wire Transfer Pattern", rule_id="iris.content.bec_wire_transfer", severity="high", mitre_techniques=("T1656",), unanchorable_reason=(
         "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
     ), is_body_dependent=True,
     category="content_analysis", family="content",
@@ -311,7 +311,7 @@ def check_bec_wire_pattern(context) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Generic Greeting", unanchorable_reason=(
+    name="Generic Greeting", rule_id="iris.content.generic_greeting", severity="low", unanchorable_reason=(
         "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
     ), is_body_dependent=True,
     category="content_analysis", family="content",
@@ -386,7 +386,7 @@ def _contains_url(text: str) -> list[str]:
 
 
 @iris_rules.register(
-    name="URL in Subject", evidence_headers=("subject",), category="content_analysis", family="content",
+    name="URL in Subject", rule_id="iris.content.url_in_subject", severity="low", evidence_headers=("subject",), category="content_analysis", family="content",
     description="Detecta si el asunto del correo contiene URLs (común en phishing)",
 )
 def check_url_in_subject(headers: dict) -> RuleResult:
@@ -470,7 +470,7 @@ def _mixed_script(text: str) -> str | None:
 
 
 @iris_rules.register(
-    name="Unicode Evasion", is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="content",
+    name="Unicode Evasion", rule_id="iris.content.unicode_evasion", severity="high", mitre_techniques=("T1036.002",), is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="content",
     description=(
         "Detecta caracteres de control bidireccional (RLO/LRO - spoofing de "
         "extension de archivo) y mezcla de scripts confusables (cirilico/"
@@ -615,7 +615,7 @@ def _encoded_word_finding_scores() -> dict[str, float]:
 
 
 @iris_rules.register(
-    name="Encoded-Word Abuse", evidence_headers=("subject", "from"), category="content_analysis", family="content",
+    name="Encoded-Word Abuse", rule_id="iris.content.encoded_word_abuse", severity="medium", mitre_techniques=("T1027",), evidence_headers=("subject", "from"), category="content_analysis", family="content",
     description=(
         "Detecta abuso de encoded-words RFC 2047 en Subject/From: bloques "
         "encadenados para evadir filtros de keywords, charsets exoticos "
@@ -654,7 +654,7 @@ _PHONE_RE = re.compile(r"(?:\+\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?
 
 
 @iris_rules.register(
-    name="TOAD Callback Pattern", unanchorable_reason=(
+    name="TOAD Callback Pattern", rule_id="iris.content.toad_callback", severity="high", mitre_techniques=("T1566.004",), unanchorable_reason=(
         "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
     ), is_body_dependent=True,
     category="content_analysis", family="content",

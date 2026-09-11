@@ -37,7 +37,7 @@ _IMG_SRC_RE = re.compile(r'<img\b[^>]*src\s*=\s*["\']([^"\']+)["\']',
 
 
 @iris_rules.register(
-    name="External Image Tracking", unanchorable_reason=(
+    name="External Image Tracking", rule_id="iris.attachment.external_image_tracking", severity="low", unanchorable_reason=(
         "La regla evalúa el cuerpo en conjunto y no registra la posición exacta de lo que encuentra, así que no hay un fragmento concreto que señalar."
     ), is_body_dependent=True,
     category="content_analysis", family="attachment",
@@ -119,7 +119,7 @@ _SRC_RE = re.compile(r'src\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
 
 @iris_rules.register(
-    name="Image-Only Email", unanchorable_reason=(
+    name="Image-Only Email", rule_id="iris.attachment.image_only_email", severity="medium", unanchorable_reason=(
         "La señal es la proporción entre imágenes y texto de todo el cuerpo, no un fragmento concreto."
     ), is_body_dependent=True,
     category="content_analysis", family="attachment",
@@ -339,7 +339,7 @@ def _check_headers_fallback(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Suspicious Attachments", is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="attachment",
+    name="Suspicious Attachments", rule_id="iris.attachment.suspicious_attachments", severity="high", mitre_techniques=("T1566.001",), is_self_anchoring=True, is_body_dependent=True, category="content_analysis", family="attachment",
     description=(
         "Inspecciona los adjuntos MIME reales (extensiones peligrosas, doble "
         "extensión, macros, HTML smuggling, ZIP con ejecutables); recurre a la "

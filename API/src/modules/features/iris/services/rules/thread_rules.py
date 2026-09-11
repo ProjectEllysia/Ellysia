@@ -40,7 +40,7 @@ REPLY_PREFIX_PATTERN = re.compile(
 
 
 @iris_rules.register(
-    name="Fake Reply Chain", evidence_headers=("subject", "in-reply-to", "references"), category="header_analysis",
+    name="Fake Reply Chain", rule_id="iris.thread.fake_reply_chain", severity="medium", evidence_headers=("subject", "in-reply-to", "references"), category="header_analysis",
     description="Detecta si el asunto imita una respuesta o reenvío sin los cabeceras In-Reply-To o References",
 )
 def check_fake_reply_chain(headers: dict) -> RuleResult:
@@ -121,7 +121,7 @@ def _strip_brackets(value: str) -> str:
 
 
 @iris_rules.register(
-    name="Self-Referencing In-Reply-To", evidence_headers=("in-reply-to", "message-id"),
+    name="Self-Referencing In-Reply-To", rule_id="iris.thread.self_referencing_in_reply_to", severity="medium", evidence_headers=("in-reply-to", "message-id"),
     category="header_analysis",
     description=(
         "Detecta cuando In-Reply-To (o el primer References) apunta al "
@@ -185,7 +185,7 @@ def check_self_referencing_in_reply_to(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Message-ID check", evidence_headers=("message-id",), category="header_analysis",
+    name="Message-ID check", rule_id="iris.thread.message_id", severity="low", evidence_headers=("message-id",), category="header_analysis",
     description="Verifica que el Message-ID esté presente y tenga una longitud razonable",
 )
 def check_message_id(headers: dict) -> RuleResult:
@@ -210,7 +210,7 @@ def check_message_id(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Message-ID Domain", evidence_headers=("message-id", "from"), category="header_analysis",
+    name="Message-ID Domain", rule_id="iris.thread.message_id_domain", severity="low", evidence_headers=("message-id", "from"), category="header_analysis",
     description="Compara el dominio del Message-ID con el dominio del remitente",
 )
 def check_msgid_domain(headers: dict) -> RuleResult:
@@ -263,7 +263,7 @@ def check_msgid_domain(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Message-ID Received Correlation", evidence_headers=("message-id", "received"),
+    name="Message-ID Received Correlation", rule_id="iris.thread.message_id_received_correlation", severity="low", evidence_headers=("message-id", "received"),
     category="header_analysis",
     description=(
         "Comprueba que el dominio del Message-ID aparezca en algún host "
