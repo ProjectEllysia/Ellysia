@@ -241,7 +241,7 @@ class IrisManager(TaskTrackingMixin):
             # nunca llegó a crearse -- nunca se cobra por un duplicado.
             quota_manager.refund(user_id, LimitKey.IRIS_ANALYSES)
             raise
-        
+
         logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
 
         # Camino feliz: publicar ahora mismo en vez de esperar al barrido
@@ -1030,8 +1030,20 @@ class IrisManager(TaskTrackingMixin):
 
     @staticmethod
     def _validate_headers_parsed(parsed: dict) -> None:
-        """Full validation after parsing — ensures the analysis runs on
-        enough data to produce meaningful results."""
+        """
+        Valida que el motor tenga suficientes cabceras para poder
+        correr las reglas. Se llama después de parsear el raw.
+        Se entiende que las cabceras su suficientes si
+        se han encontrado al menos `min_headers` cabeceras válidas.
+
+        `CR.iris_config().min_headers`: Configuración que define el mínimo de cabeceras 
+        válidas requeridas para que el análisis sea considerado válido en `SecOpsConfig.json`.
+
+        Args:
+            parsed: Diccionario de cabeceras parseadas.
+        Raises:
+            IrisInvalidInputError: Si el número de cabeceras parseadas es menor que `min_headers`. 
+        """
         min_h = CR.iris_config().min_headers
         if len(parsed) < min_h:
             raise IrisInvalidInputError(
@@ -1100,22 +1112,31 @@ class IrisManager(TaskTrackingMixin):
                 policy = current_policy()
                 with CR.scoring_weight_overrides(policy.weight_overrides):
                     evaluations = self._evaluate_contexts(analysis_id, context, job, rules_defs, policy)
+
                 if evaluations is None:
                     return  # cancelado: no es un fallo, no hay nada que persistir
+
                 winner, secondary, winning_reason = choose_winning_evaluation(
                     evaluations, _VERDICT_SEVERITY,
                 )
                 verdict, total_score = winner.verdict, winner.total_score
-                confidence = assess_confidence(winner, secondary,
-                                               policy.legitimate_threshold,
-                                               policy.suspicious_threshold)
+                confidence = assess_confidence(
+                    winner=winner, 
+                    secondary=secondary,
+                    legitimate_threshold=policy.legitimate_threshold,
+                    suspicious_threshold=policy.suspicious_threshold
+                )
 
-                self._persist_analysis_results(analysis_id, rules_defs, winner,
-                                               detector_version(rules_defs),
-                                               secondary=secondary,
-                                               winning_reason=winning_reason,
-                                               confidence=confidence,
-                                               scoring_policy=policy)
+                self._persist_analysis_results(
+                    analysis_id, 
+                    rules_defs,
+                    winner,
+                    detector=detector_version(rules_defs),
+                    secondary=secondary,
+                    winning_reason=winning_reason,
+                    confidence=confidence,
+                    scoring_policy=policy
+                )
             except Exception as e:
                 logger.error(f"Analysis {analysis_id} failed: {e}", exc_info=True)
                 self._fail_analysis(analysis_id, classify_failure(e))
@@ -1225,8 +1246,7 @@ class IrisManager(TaskTrackingMixin):
                 ``None`` fuera de la cola: entonces no hay cancelación ni
                 progreso que informar.
             rules_defs: Catálogo de reglas, leído una sola vez por análisis.
-            policy: Política con que se puntúa y decide. Por defecto ``None``:
-                la vigente.
+            policy: Política con que se puntúa y decide. Por defecto ``None``: la vigente.
 
         Returns:
             Optional[List[ContextEvaluation]]: Una evaluación por contexto,
@@ -1262,8 +1282,11 @@ class IrisManager(TaskTrackingMixin):
                     return None
 
                 try:
-                    rule_input = (evaluated_context if rule_def.get("needs_context")
-                                  else evaluated_context.headers)
+                    rule_input = (
+                        evaluated_context 
+                        if rule_def.get("needs_context")
+                        else evaluated_context.headers
+                    )
                     result = rule_def["func"](rule_input)
                 except Exception as e:
                     logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
