@@ -347,6 +347,66 @@ def test_full_campaign_flow_send_and_quiz_no_repeat(
     assert "questions" not in after_data
 
 
+def test_campaign_list_summarises_how_far_recipients_got(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz,
+):
+    """El listado trae el progreso de cada campaña sin pedir su detalle.
+
+    Tres destinatarios: uno completa (1 de 2 aciertos), otro solo abre el
+    enlace y el tercero no hace nada. Quien completó cuenta también como
+    abierto. Un borrador, sin destinatarios aún, sale a cero y sin nota.
+    """
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    list_id = client.post(
+        "/aegis/lists", headers=admin_headers, json={"name": "Plantilla"}
+    ).get_json()["id"]
+    client.post(
+        f"/aegis/lists/{list_id}/recipients", headers=admin_headers,
+        json={"recipients": [
+            {"email": "ana@empresa.test"}, {"email": "bob@empresa.test"}, {"email": "carla@empresa.test"},
+        ]},
+    )
+    launched_id = client.post(
+        "/aegis/campaigns", headers=admin_headers,
+        json={"documentId": doc_id, "listId": list_id, "name": "Lanzada"},
+    ).get_json()["id"]
+    draft_id = client.post(
+        "/aegis/campaigns", headers=admin_headers,
+        json={"documentId": doc_id, "listId": list_id, "name": "Borrador"},
+    ).get_json()["id"]
+
+    with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+        assert client.post(
+            f"/aegis/campaigns/{launched_id}/launch", headers=admin_headers
+        ).status_code == 200
+
+    ana = _fetch_token_for_email(app, launched_id, "ana@empresa.test")
+    bob = _fetch_token_for_email(app, launched_id, "bob@empresa.test")
+    client.get(f"/aegis/quiz?t={ana}")
+    client.post(f"/aegis/quiz?t={ana}", json={"answers": [
+        {"questionPosition": 1, "selectedIndex": 0},
+        {"questionPosition": 2, "selectedIndex": 1},
+    ]})
+    client.get(f"/aegis/quiz?t={bob}")
+
+    campaigns = {
+        campaign["id"]: campaign
+        for campaign in client.get("/aegis/campaigns", headers=admin_headers).get_json()["campaigns"]
+    }
+
+    launched = campaigns[launched_id]
+    assert launched["recipientCount"] == 3
+    assert launched["openedCount"] == 2
+    assert launched["completedCount"] == 1
+    assert launched["averageScore"] == 1.0
+
+    draft = campaigns[draft_id]
+    assert draft["recipientCount"] == 0
+    assert draft["openedCount"] == 0
+    assert draft["completedCount"] == 0
+    assert draft["averageScore"] is None
+
+
 def test_quiz_serves_and_grades_more_than_two_questions(
     app, client, admin_user, admin_headers, make_aegis_doc_with_quiz,
 ):

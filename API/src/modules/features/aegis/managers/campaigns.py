@@ -173,8 +173,28 @@ class CampaignManager(TaskTrackingMixin):
             return campaign.to_dict()
 
     def list_campaigns(self) -> list[dict]:
+        """Lista las campañas del usuario, de la más reciente a la más antigua, con su resumen de progreso.
+
+        Cada campaña trae, además de sus datos, cuántos destinatarios tiene y
+        cuántos abrieron el enlace, cuántos completaron el test y su nota
+        media. Así quien consulta varias campañas a la vez no tiene que pedir
+        el detalle de cada una.
+
+        Returns:
+            list[dict]: Una entrada por campaña con los campos de
+                ``Campaign.to_dict()`` más ``recipientCount``, ``openedCount``,
+                ``completedCount`` y ``averageScore``. Un borrador todavía no
+                tiene destinatarios: sale con los contadores a cero y
+                ``averageScore`` a ``None``.
+        """
         repo = build_repository(CampaignRepository)
-        return [campaign.to_dict() for campaign in repo.get_campaigns_by_user(self.user.id)]
+        campaigns = repo.get_campaigns_by_user(self.user.id)
+        summaries = repo.get_recipient_summaries([campaign.id for campaign in campaigns])
+        empty_summary = {"recipientCount": 0, "openedCount": 0, "completedCount": 0, "averageScore": None}
+        return [
+            {**campaign.to_dict(), **summaries.get(campaign.id, empty_summary)}
+            for campaign in campaigns
+        ]
 
     def get_campaign(self, campaign_id: int) -> dict:
         campaign = self._assert_campaign_ownership(campaign_id)
