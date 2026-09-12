@@ -163,6 +163,37 @@
             </div>
           </div>
 
+          <template v-if="detail.questions?.length">
+            <h3 class="section-label">Resultados por pregunta</h3>
+            <ol class="questions">
+              <li v-for="question in detail.questions" :key="question.position" class="question">
+                <div class="question-head">
+                  <span class="question-prompt">{{ question.prompt }}</span>
+                  <span class="question-rate">
+                    {{ question.answeredCount ? `${percentOf(question.correctCount, question.answeredCount)}% acertó` : 'Sin respuestas' }}
+                  </span>
+                </div>
+                <ul class="options">
+                  <li
+                    v-for="(option, index) in question.options"
+                    :key="index"
+                    class="option"
+                    :class="{ 'option--correct': index === question.correctIndex }"
+                  >
+                    <span class="option-text">
+                      {{ option }}
+                      <span v-if="index === question.correctIndex" class="option-tag">Correcta</span>
+                    </span>
+                    <span class="option-bar" aria-hidden="true">
+                      <span :style="{ width: `${percentOf(question.optionCounts[index], question.answeredCount)}%` }"></span>
+                    </span>
+                    <span class="option-count">{{ question.optionCounts[index] }}</span>
+                  </li>
+                </ul>
+              </li>
+            </ol>
+          </template>
+
           <h3 class="section-label">Destinatarios</h3>
           <p v-if="!detail.recipients.length" class="panel-note panel-note--inline">Esta campaña todavía no tiene destinatarios.</p>
           <div v-else class="table-wrap">
@@ -469,6 +500,24 @@ onMounted(async () => {
 .progress-fill--opened { background: var(--warn); }
 
 .section-label { margin: 0 0 0.6rem; font-size: var(--fs-md); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+
+/* Resultados por pregunta: cuánta gente eligió cada opción. La correcta se
+   marca con texto además de con color, para quien no distingue el verde. */
+.questions { list-style: none; margin: 0 0 1.6rem; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; counter-reset: question; }
+.question { padding: 0.8rem 0.95rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; counter-increment: question; }
+.question-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 0.6rem; }
+.question-prompt { color: var(--text); font-weight: 600; font-size: var(--fs-lg); line-height: 1.4; }
+.question-prompt::before { content: counter(question) ". "; color: var(--text-muted); }
+.question-rate { flex-shrink: 0; color: var(--accent-bright); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md); }
+.options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.option { display: grid; grid-template-columns: minmax(0, 1fr) 9rem 2rem; align-items: center; gap: 0.75rem; font-size: var(--fs-md); color: var(--text-dim); }
+.option-text { min-width: 0; overflow-wrap: anywhere; }
+.option-tag { display: inline-block; margin-left: 0.4rem; padding: 0.05rem 0.35rem; border-radius: 4px; background: var(--success-dim); color: var(--success); font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.option--correct .option-text { color: var(--text); }
+.option-bar { height: 6px; border-radius: 3px; background: var(--bg); overflow: hidden; }
+.option-bar span { display: block; height: 100%; border-radius: 3px; background: var(--text-muted); }
+.option--correct .option-bar span { background: var(--success); }
+.option-count { text-align: right; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); color: var(--text); }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .recipients { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }

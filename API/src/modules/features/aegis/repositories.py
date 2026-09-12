@@ -545,6 +545,33 @@ class CampaignRepository(BaseRepository[Campaign]):
             .all()
         )
 
+    def get_answer_counts(self, campaign_id: int) -> dict[tuple[int, int], int]:
+        """Cuenta cuántos destinatarios de una campaña eligieron cada opción de cada pregunta.
+
+        Es la materia prima de los resultados por pregunta del detalle de la
+        campaña: de aquí sale cuánta gente respondió cada pregunta, cuánta
+        acertó y qué opción equivocada atrajo más.
+
+        Args:
+            campaign_id: Id de la campaña cuyas respuestas se cuentan.
+
+        Returns:
+            dict[tuple[int, int], int]: ``{(question_position, selected_index): count}``.
+                Una combinación que nadie eligió no aparece, que equivale a un cero.
+        """
+        rows = (
+            self._session.query(
+                CampaignAnswer.question_position,
+                CampaignAnswer.selected_index,
+                func.count(CampaignAnswer.id),
+            )
+            .join(CampaignRecipient, CampaignAnswer.campaign_recipient_id == CampaignRecipient.id)
+            .filter(CampaignRecipient.campaign_id == campaign_id)
+            .group_by(CampaignAnswer.question_position, CampaignAnswer.selected_index)
+            .all()
+        )
+        return {(position, selected_index): count for position, selected_index, count in rows}
+
     def get_recipient_by_token(self, token: str) -> Optional[CampaignRecipient]:
         """
         Look up the sole identity of the public quiz page: the recipient
