@@ -103,7 +103,7 @@
           <span v-if="reportData.winningReason" class="unwrap-wrapper-info">{{ reportData.winningReason }}</span>
           <span v-if="reportData.secondaryContext" class="unwrap-wrapper-info">
             {{ reportData.secondaryContext.contextType === 'wrapper' ? 'Envoltorio' : 'Original' }}:
-            {{ reportData.secondaryContext.verdict }} ({{ reportData.secondaryContext.totalScore }} puntos)
+            {{ verdictLabel(reportData.secondaryContext.verdict) }} ({{ reportData.secondaryContext.totalScore }} puntos)
           </span>
           <span v-if="reportData.wrapperFrom || reportData.wrapperSubject" class="unwrap-wrapper-info">
             Envoltorio: <template v-if="reportData.wrapperFrom">de {{ reportData.wrapperFrom }}</template>
@@ -405,6 +405,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useUtils } from '@/composables/useUtils'
+import { verdictLabel } from '@/components/iris/verdict'
 import { useIrisStore } from '@/stores/irisStore'
 import IrisEmailPath from '@/components/iris/IrisEmailPath.vue'
 import IrisDocumentsModal from '@/components/iris/IrisDocumentsModal.vue'

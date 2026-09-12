@@ -5,7 +5,7 @@
       <span class="score-unit">/ máx</span>
     </div>
     <div class="rv-hero-verdict">
-      <span class="verdict-badge" :class="`verdict--${verdictClass}`">{{ verdict }}</span>
+      <span class="verdict-badge" :class="`verdict--${verdictClass}`">{{ verdictLabel(verdict) }}</span>
       <span class="verdict-status">{{ statusLabel }}</span>
       <span v-if="confidenceLabel" class="verdict-confidence" :class="`confidence--${confidence}`">
         Confianza {{ confidenceLabel }} · {{ coverageLabel }}
@@ -21,6 +21,7 @@
  * sección del informe, así que no hace falta duplicar nada en el padre.
  */
 import { computed } from 'vue'
+import { verdictClass as toVerdictClass, verdictLabel } from '@/components/iris/verdict'
 
 const props = defineProps({
   score: { type: [Number, null], default: null },
@@ -38,13 +39,7 @@ const coverageLabel = computed(() =>
   props.coverageMode === 'headers_only' ? 'solo cabeceras' : 'mensaje completo'
 )
 
-const verdictClass = computed(() => {
-  const v = props.verdict?.toLowerCase() ?? ''
-  if (v === 'legitimate') return 'legit'
-  if (v === 'suspicious') return 'susp'
-  if (v === 'phishing') return 'phish'
-  return 'unknown'
-})
+const verdictClass = computed(() => toVerdictClass(props.verdict))
 
 const statusLabel = computed(() => {
   const v = props.verdict?.toLowerCase() ?? ''

@@ -15,7 +15,7 @@
               <section v-for="report in [left, right]" :key="report.analysisId" class="compare-card">
                 <p class="compare-id">#{{ report.analysisId }} · {{ report.title || '(sin título)' }}</p>
                 <p class="compare-verdict" :class="`verdict--${(report.verdict || '').toLowerCase()}`">
-                  {{ VERDICT_LABELS[report.verdict] || report.verdict }} · {{ report.totalScore }}
+                  {{ verdictLabel(report.verdict) }} · {{ report.totalScore }}
                 </p>
                 <p class="compare-meta">
                   Confianza {{ CONFIDENCE_LABELS[report.confidence] || 'sin evaluar' }} ·
@@ -63,6 +63,7 @@ import { computed, ref, watch } from 'vue'
 import { useIrisStore } from '@/stores/irisStore'
 import { useModalA11y } from '@/composables/useModalA11y'
 import { compareReports } from '@/components/iris/compare.js'
+import { ruleVerdictLabel, verdictLabel } from '@/components/iris/verdict'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -79,7 +80,6 @@ const loading = ref(false)
 const error = ref(null)
 const showAll = ref(false)
 
-const VERDICT_LABELS = { Legitimate: 'Legítimo', Suspicious: 'Sospechoso', Phishing: 'Phishing' }
 const CONFIDENCE_LABELS = { high: 'alta', medium: 'media', low: 'baja' }
 
 const comparison = computed(() => (left.value && right.value ? compareReports(left.value, right.value) : null))
@@ -87,8 +87,15 @@ const visibleRules = computed(() =>
   showAll.value ? comparison.value.rules : comparison.value.rules.filter(entry => entry.changed)
 )
 
+/**
+ * Celda de una regla en la tabla comparativa: su resultado y su puntuación.
+ *
+ * @param {{verdict: string, score: number}|null} side - La regla en uno de
+ *   los dos informes, o `null` si ese informe no la tiene.
+ * @returns {string} «Correcto (0)», «Falla (-20)»…, o «—» si falta.
+ */
 function describe(side) {
-  return side ? `${side.verdict} (${side.score})` : '—'
+  return side ? `${ruleVerdictLabel(side.verdict)} (${side.score})` : '—'
 }
 
 watch(() => [props.show, ...props.analysisIds], async () => {
