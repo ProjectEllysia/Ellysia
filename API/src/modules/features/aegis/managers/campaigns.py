@@ -64,6 +64,39 @@ from ..repositories import (
 logger = logging.getLogger(__name__)
 
 
+def _question_results(question: dict, answer_counts: dict[tuple[int, int], int]) -> dict:
+    """Junta una pregunta del test congelado con lo que respondieron los destinatarios.
+
+    La usa ``CampaignManager.get_campaign`` para los resultados por pregunta.
+
+    Args:
+        question: Pregunta tal como quedó en ``Campaign.questions_snapshot``
+            (``position``, ``prompt``, ``options``, ``correctIndex``).
+        answer_counts: Recuento ``{(question_position, selected_index): count}``
+            de ``CampaignRepository.get_answer_counts``.
+
+    Returns:
+        dict: La pregunta con ``optionCounts`` (cuántos eligieron cada opción,
+            en el orden de ``options``), ``answeredCount`` (cuántos la
+            respondieron) y ``correctCount`` (cuántos acertaron).
+    """
+    options = question.get("options") or []
+    option_counts = [
+        answer_counts.get((question["position"], index), 0) for index in range(len(options))
+    ]
+    correct_index = question.get("correctIndex")
+    has_correct_option = correct_index in range(len(options))
+    return {
+        "position": question["position"],
+        "prompt": question.get("prompt", ""),
+        "options": options,
+        "correctIndex": correct_index,
+        "optionCounts": option_counts,
+        "answeredCount": sum(option_counts),
+        "correctCount": option_counts[correct_index] if has_correct_option else 0,
+    }
+
+
 class CampaignManager(TaskTrackingMixin):
     """
     Gestiona listas de distribución y campañas de concienciación.
@@ -173,15 +206,66 @@ class CampaignManager(TaskTrackingMixin):
             return campaign.to_dict()
 
     def list_campaigns(self) -> list[dict]:
+        """Lista las campañas del usuario con su resumen de progreso, la más reciente primero.
+
+        Cada campaña trae, además de sus datos, cuántos destinatarios tiene y
+        cuántos abrieron el enlace, cuántos completaron el test y su nota
+        media. Así quien consulta varias campañas a la vez no tiene que pedir
+        el detalle de cada una.
+
+        Returns:
+            list[dict]: Una entrada por campaña con los campos de
+                ``Campaign.to_dict()`` más ``recipientCount``, ``openedCount``,
+                ``completedCount`` y ``averageScore``. Un borrador todavía no
+                tiene destinatarios: sale con los contadores a cero y
+                ``averageScore`` a ``None``.
+        """
         repo = build_repository(CampaignRepository)
-        return [campaign.to_dict() for campaign in repo.get_campaigns_by_user(self.user.id)]
+        campaigns = repo.get_campaigns_by_user(self.user.id)
+        summaries = repo.get_recipient_summaries([campaign.id for campaign in campaigns])
+        empty_summary = {
+            "recipientCount": 0, "openedCount": 0, "completedCount": 0, "averageScore": None,
+        }
+        return [
+            {**campaign.to_dict(), **summaries.get(campaign.id, empty_summary)}
+            for campaign in campaigns
+        ]
 
     def get_campaign(self, campaign_id: int) -> dict:
+        """Devuelve el detalle de una campaña del usuario con sus resultados.
+
+        Incluye el seguimiento de cada destinatario y, por cada pregunta del
+        test, qué respondieron. Las preguntas salen del test congelado al
+        lanzar la campaña, no de la píldora actual: si la píldora se editó
+        después, sus resultados siguen refiriéndose a lo que los
+        destinatarios vieron de verdad.
+
+        Args:
+            campaign_id: Id de la campaña. Tiene que ser del usuario; si no,
+                se responde como si no existiera.
+
+        Returns:
+            dict: Los campos de ``Campaign.to_dict()`` más ``recipients`` (una
+                fila de seguimiento por destinatario) y ``questions`` (una
+                entrada por pregunta, en orden, con ``optionCounts``,
+                ``answeredCount`` y ``correctCount``; ver
+                ``_question_results``). Un borrador trae las dos listas vacías.
+
+        Raises:
+            CampaignNotFoundError: Si la campaña no existe o es de otro usuario.
+        """
         campaign = self._assert_campaign_ownership(campaign_id)
         repo = build_repository(CampaignRepository)
         recipients = repo.get_recipients(campaign_id)
+        answer_counts = repo.get_answer_counts(campaign_id)
+        snapshot = sorted(
+            campaign.questions_snapshot or [], key=lambda question: question["position"],
+        )
         result = campaign.to_dict()
         result["recipients"] = [recipient.to_dict() for recipient in recipients]
+        result["questions"] = [
+            _question_results(question, answer_counts) for question in snapshot
+        ]
         return result
 
     def launch_campaign(self, campaign_id: int) -> dict:

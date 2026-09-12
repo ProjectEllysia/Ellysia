@@ -347,6 +347,119 @@ def test_full_campaign_flow_send_and_quiz_no_repeat(
     assert "questions" not in after_data
 
 
+def test_campaign_list_summarises_how_far_recipients_got(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz,
+):
+    """El listado trae el progreso de cada campaña sin pedir su detalle.
+
+    Tres destinatarios: uno completa (1 de 2 aciertos), otro solo abre el
+    enlace y el tercero no hace nada. Quien completó cuenta también como
+    abierto. Un borrador, sin destinatarios aún, sale a cero y sin nota.
+    """
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    list_id = client.post(
+        "/aegis/lists", headers=admin_headers, json={"name": "Plantilla"}
+    ).get_json()["id"]
+    client.post(
+        f"/aegis/lists/{list_id}/recipients", headers=admin_headers,
+        json={"recipients": [
+            {"email": "ana@empresa.test"}, {"email": "bob@empresa.test"}, {"email": "carla@empresa.test"},
+        ]},
+    )
+    launched_id = client.post(
+        "/aegis/campaigns", headers=admin_headers,
+        json={"documentId": doc_id, "listId": list_id, "name": "Lanzada"},
+    ).get_json()["id"]
+    draft_id = client.post(
+        "/aegis/campaigns", headers=admin_headers,
+        json={"documentId": doc_id, "listId": list_id, "name": "Borrador"},
+    ).get_json()["id"]
+
+    with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+        assert client.post(
+            f"/aegis/campaigns/{launched_id}/launch", headers=admin_headers
+        ).status_code == 200
+
+    ana = _fetch_token_for_email(app, launched_id, "ana@empresa.test")
+    bob = _fetch_token_for_email(app, launched_id, "bob@empresa.test")
+    client.get(f"/aegis/quiz?t={ana}")
+    client.post(f"/aegis/quiz?t={ana}", json={"answers": [
+        {"questionPosition": 1, "selectedIndex": 0},
+        {"questionPosition": 2, "selectedIndex": 1},
+    ]})
+    client.get(f"/aegis/quiz?t={bob}")
+
+    campaigns = {
+        campaign["id"]: campaign
+        for campaign in client.get("/aegis/campaigns", headers=admin_headers).get_json()["campaigns"]
+    }
+
+    launched = campaigns[launched_id]
+    assert launched["recipientCount"] == 3
+    assert launched["openedCount"] == 2
+    assert launched["completedCount"] == 1
+    assert launched["averageScore"] == 1.0
+
+    draft = campaigns[draft_id]
+    assert draft["recipientCount"] == 0
+    assert draft["openedCount"] == 0
+    assert draft["completedCount"] == 0
+    assert draft["averageScore"] is None
+
+
+def test_campaign_detail_reports_results_per_question_of_the_frozen_quiz(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz,
+):
+    """El detalle cuenta, por pregunta, quién respondió, quién acertó y qué eligió.
+
+    La correcta es siempre la última opción (índice 1). Ana falla la primera y
+    acierta la segunda; Bob acierta las dos. Después de lanzar se reescribe la
+    pregunta en la píldora: el detalle tiene que seguir enseñando la que los
+    destinatarios vieron, la del test congelado.
+    """
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    list_id = client.post(
+        "/aegis/lists", headers=admin_headers, json={"name": "Plantilla"}
+    ).get_json()["id"]
+    client.post(
+        f"/aegis/lists/{list_id}/recipients", headers=admin_headers,
+        json={"recipients": [{"email": "ana@empresa.test"}, {"email": "bob@empresa.test"}]},
+    )
+    campaign_id = client.post(
+        "/aegis/campaigns", headers=admin_headers,
+        json={"documentId": doc_id, "listId": list_id, "name": "Por pregunta"},
+    ).get_json()["id"]
+    with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+        assert client.post(
+            f"/aegis/campaigns/{campaign_id}/launch", headers=admin_headers
+        ).status_code == 200
+
+    from src.modules.infrastructure.unit_of_work import UnitOfWork
+    from src.modules.features.aegis.model import AegisQuizQuestion
+    with app.app_context():
+        with UnitOfWork() as uow:
+            for question in uow.session.query(AegisQuizQuestion).filter_by(document_id=doc_id):
+                question.prompt = "Editada después de lanzar"
+
+    for email, first_choice in (("ana@empresa.test", 0), ("bob@empresa.test", 1)):
+        token = _fetch_token_for_email(app, campaign_id, email)
+        client.get(f"/aegis/quiz?t={token}")
+        client.post(f"/aegis/quiz?t={token}", json={"answers": [
+            {"questionPosition": 1, "selectedIndex": first_choice},
+            {"questionPosition": 2, "selectedIndex": 1},
+        ]})
+
+    questions = client.get(f"/aegis/campaigns/{campaign_id}", headers=admin_headers).get_json()["questions"]
+
+    assert [question["position"] for question in questions] == [1, 2]
+    assert questions[0]["prompt"].startswith("¿Qué haces ante la situación de phishing nº 1")
+    assert questions[0]["optionCounts"] == [1, 1]
+    assert questions[0]["answeredCount"] == 2
+    assert questions[0]["correctCount"] == 1
+    assert questions[1]["optionCounts"] == [0, 2]
+    assert questions[1]["correctCount"] == 2
+
+
 def test_quiz_serves_and_grades_more_than_two_questions(
     app, client, admin_user, admin_headers, make_aegis_doc_with_quiz,
 ):

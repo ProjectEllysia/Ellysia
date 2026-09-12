@@ -319,11 +319,11 @@ Iris applies rules across authentication (SPF, DKIM, DMARC, ARC), header anomali
 | `GET` | `/aegis/export/md/<id>` | Raw Markdown of a pill |
 | `POST/GET/DELETE` | `/aegis/lists[/<id>]` | Distribution lists (owner) |
 | `POST/GET/DELETE` | `/aegis/lists/<id>/recipients[/<rid>]` | Recipients within a list (owner) |
-| `POST/GET/DELETE` | `/aegis/campaigns[/<id>]` | Create / list / detail / delete a campaign (owner) |
+| `POST/GET/DELETE` | `/aegis/campaigns[/<id>]` | Create / list / detail / delete a campaign (owner). The list carries each campaign's recipient summary (`recipientCount`, `openedCount`, `completedCount`, `averageScore`); the detail adds per-recipient tracking and per-question results against the frozen quiz (`optionCounts`, `answeredCount`, `correctCount`) |
 | `POST` | `/aegis/campaigns/<id>/launch` | Launch: snapshots the quiz, mints one opaque token per recipient, queues sending |
 | `GET/POST` | `/aegis/quiz?t=<token>` | **Public, no auth** — serve/grade the quiz for one recipient. One-shot: a completed token always 409s on resubmission |
 
-Aegis combines AI-generated awareness content with current alerts from the **INCIBE-CERT RSS feed** and the **local Lybra knowledge base** (NVD/KEV/EPSS), scoped to the products the organization tracks. Each generated pill also gets a multiple-choice quiz; a **campaign** sends the pill + quiz to a distribution list, tracking `sent → opened → completed` per recipient via `herald`.
+Aegis combines AI-generated awareness content with current alerts from the **INCIBE-CERT RSS feed** and the **local Lybra knowledge base** (NVD/KEV/EPSS), scoped to the products the organization tracks. Each generated pill also gets a multiple-choice quiz; a **campaign** sends the pill + quiz to a distribution list, tracking `sent → opened → completed` per recipient via `herald`. The SPA keeps launching and reviewing apart: a campaign is launched from the pill viewer, and `/aegis/campanas` groups the launched ones by pill, with their aggregate open and completion rates, average score and per-question results.
 
 ### Acheron — credential vault
 

@@ -58,19 +58,33 @@
         >
           <span :class="{ 'chevron--flipped': rightCollapsed }">›</span>
         </button>
-        <div class="panel-content" v-show="!rightCollapsed">
-          <HistoryPanel
-            :documents="store.sortedDocuments()"
-            :error="store.listError"
-            :current-doc-id="store.currentDocId"
-            :sort-mode="store.sortMode"
-            @view="store.loadDocument($event)"
-            @delete="store.deleteDocument($event)"
-            @export="(docId, fmt) => store.downloadExport(docId, fmt)"
-            @preview="store.previewMarkdown($event)"
-            @sort="store.sortMode = $event"
-            @refresh="store.loadHistory()"
-          />
+        <div class="panel-content panel-content--history" v-show="!rightCollapsed">
+          <!-- Acceso a la vista de campañas: lanzar se hace desde el visor de
+               cada píldora, pero consultar lo enviado tiene su propia vista. -->
+          <router-link to="/aegis/campanas" class="campaigns-cta">
+            <span class="campaigns-cta-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            </span>
+            <span class="campaigns-cta-text">
+              <span class="campaigns-cta-title">Campañas</span>
+              <span class="campaigns-cta-sub">Resultados de lo que ya has enviado</span>
+            </span>
+            <span class="campaigns-cta-arrow" aria-hidden="true">›</span>
+          </router-link>
+          <div class="history-slot">
+            <HistoryPanel
+              :documents="store.sortedDocuments()"
+              :error="store.listError"
+              :current-doc-id="store.currentDocId"
+              :sort-mode="store.sortMode"
+              @view="store.loadDocument($event)"
+              @delete="store.deleteDocument($event)"
+              @export="(docId, fmt) => store.downloadExport(docId, fmt)"
+              @preview="store.previewMarkdown($event)"
+              @sort="store.sortMode = $event"
+              @refresh="store.loadHistory()"
+            />
+          </div>
         </div>
       </aside>
     </div>
@@ -128,6 +142,10 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   document.documentElement.classList.remove('aegis-scroll-lock')
+  // El modal de campaña se abre con un flag del store, que sobrevive a la
+  // vista: si se sale con él abierto (su enlace a la vista de campañas, o
+  // el botón de atrás), al volver al generador reaparecería solo.
+  store.closeCampaignModal()
 })
 </script>
 
@@ -164,6 +182,25 @@ onBeforeUnmount(() => {
 }
 .lists-btn:hover { border-color: var(--accent); color: var(--accent-bright); }
 .lists-btn:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+
+/* La barra del historial apila el acceso a campañas y el historial; este
+   último ocupa el resto y scrollea por dentro (HistoryPanel mide 100%). */
+.panel-content--history { display: flex; flex-direction: column; }
+.history-slot { flex: 1; min-height: 0; }
+.campaigns-cta {
+  display: flex; align-items: center; gap: 0.7rem; flex-shrink: 0;
+  margin: 0.75rem 0.75rem 0.6rem; padding: 0.75rem 0.85rem;
+  border-radius: 10px; border: 1px solid var(--accent);
+  background: var(--accent-dim); color: var(--text); text-decoration: none;
+  transition: background var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+.campaigns-cta:hover { background: var(--surface-3); box-shadow: 0 4px 14px rgba(0,0,0,0.25); transform: translateY(-1px); }
+.campaigns-cta:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.campaigns-cta-icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); flex-shrink: 0; }
+.campaigns-cta-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.campaigns-cta-title { font-size: var(--fs-lg); font-weight: 700; color: var(--accent-bright); font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
+.campaigns-cta-sub { font-size: var(--fs-md); color: var(--text-dim); }
+.campaigns-cta-arrow { color: var(--accent-bright); font-size: var(--fs-xl); line-height: 1; }
 
 /* ── Entrada escalonada al cargar — mismo lenguaje que ThemisView ── */
 .panel--left   { animation: seq-fade-up 0.45s ease-out backwards; }
@@ -213,6 +250,8 @@ onBeforeUnmount(() => {
   .panel--left, .panel--center, .panel--right { animation: none !important; }
   .panel--left, .panel--right { transition: none !important; }
   .panel-toggle span { transition: none !important; }
+  .campaigns-cta { transition: none !important; }
+  .campaigns-cta:hover { transform: none; }
   /* No "none": con mode="out-in" Vue espera un transitionend real para
      montar el bloque entrante; "none" nunca lo dispara y el contenido
      saliente se queda pegado en pantalla (mismo gotcha que en ThemisView). */
