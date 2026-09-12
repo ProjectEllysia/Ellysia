@@ -500,8 +500,8 @@ cd web/app
 npm test                  # all nine suites — this is what CI runs
 
 npm run test:acheron      # schema/label correspondence + crypto interop + CRUD + sync for the Acheron vault client
-npm run test:iris         # file intake (size limit from GET /iris/capabilities, explicit mode, batch drops) and report comparison
-npm run test:hygeia       # metric-formatting tests for the Hygeia dashboard
+npm run test:iris         # file intake (size limit from GET /iris/capabilities, explicit mode, batch drops), report comparison, and the Spanish labels for verdicts, statuses and rule results
+npm run test:hygeia       # metric formatting, chart math, and asset-status/anomaly labels for the Hygeia dashboard
 npm run test:polling      # usePolling composable tests
 npm run test:element-width # useElementWidth composable tests
 npm run test:toast        # toast-store tests
