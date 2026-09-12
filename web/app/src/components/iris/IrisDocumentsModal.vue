@@ -48,7 +48,7 @@
               <div class="doc-info">
                 <span class="doc-status" :class="`status--${doc.status}`">{{ statusLabel(doc.status) }}</span>
                 <span class="doc-id">#{{ doc.documentId }}</span>
-                <span v-if="doc.verdict" class="doc-verdict" :class="`verdict--${verdictClass(doc.verdict)}`">{{ doc.verdict }}</span>
+                <span v-if="doc.verdict" class="doc-verdict" :class="`verdict--${verdictClass(doc.verdict)}`">{{ verdictLabel(doc.verdict) }}</span>
                 <span class="doc-date">{{ formatDate(doc.generatedAt || doc.createdAt) }}</span>
               </div>
               <div class="doc-buttons">
@@ -80,6 +80,7 @@
 
 <script setup>
 import { useUtils } from '@/composables/useUtils'
+import { verdictClass, verdictLabel } from '@/components/iris/verdict'
 
 const { formatDate } = useUtils()
 
@@ -93,19 +94,17 @@ defineProps({
 
 defineEmits(['close', 'refresh', 'generate', 'download', 'delete'])
 
+/**
+ * Rótulo del estado de generación de un documento.
+ *
+ * @param {string|null} status - `running`, `done` o `error`.
+ * @returns {string} «Generando», «Listo», «Error», o «Desconocido» si no se conoce.
+ */
 function statusLabel(status) {
   if (status === 'running') return 'Generando'
   if (status === 'done') return 'Listo'
   if (status === 'error') return 'Error'
-  return status
-}
-
-function verdictClass(v) {
-  const value = v?.toLowerCase() ?? ''
-  if (value === 'legitimate') return 'legit'
-  if (value === 'suspicious') return 'susp'
-  if (value === 'phishing') return 'phish'
-  return 'unknown'
+  return 'Desconocido'
 }
 </script>
 

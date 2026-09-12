@@ -239,6 +239,43 @@ export function describePowerPeriod(period) {
   }
 }
 
+const ASSET_STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inestable', offline: 'Caído' }
+
+/**
+ * Rótulo en castellano del estado de conexión de un activo.
+ *
+ * Solo traduce el estado: el matiz de «Apagado» para un activo que se apaga
+ * a propósito depende también de `isPersistent`, y lo resuelve la lista.
+ *
+ * @param {string|null} status - Estado del servidor: `pending`, `online`,
+ *   `stale` u `offline`.
+ * @returns {string} El rótulo del estado, o «Desconocido» si no se conoce.
+ */
+export function assetStatusLabel(status) {
+  return ASSET_STATUS_LABELS[status] || 'Desconocido'
+}
+
+const ANOMALY_KIND_LABELS = {
+  cpu_spike: 'Pico de CPU', mem_high: 'Memoria alta', swap_thrash: 'Swap saturado',
+  disk_full: 'Disco lleno', host_down: 'Host caído',
+}
+
+/**
+ * Rótulo en castellano de un tipo de anomalía, para la lista de anomalías y
+ * las marcas de la gráfica.
+ *
+ * Un tipo que el mapa no conoce —uno que el servidor añada antes que el
+ * SPA— cae en el rótulo genérico y no en el identificador crudo: la pantalla
+ * tiene que seguir leyéndose en castellano (CONVENCIONES.md § 12.2).
+ *
+ * @param {string|null} kind - Tipo de anomalía del servidor (`cpu_spike`,
+ *   `mem_high`, `swap_thrash`, `disk_full`, `host_down`…).
+ * @returns {string} El rótulo del tipo, o «Anomalía» si no se conoce.
+ */
+export function anomalyKindLabel(kind) {
+  return ANOMALY_KIND_LABELS[kind] || 'Anomalía'
+}
+
 /**
  * Tiempo encendido en lenguaje natural, con dos unidades de precisión.
  *

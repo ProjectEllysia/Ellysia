@@ -15,20 +15,19 @@
 
             <template v-else>
               <div class="summary-head">
-                <span class="scan-id mono">#{{ analysis.scanId }}</span>
-                <span class="scan-status" :class="analysis.status">{{ STATUS_LABEL[analysis.status] || analysis.status }}</span>
+                <span class="scan-status" :class="analysis.status">{{ STATUS_LABEL[analysis.status] || 'Desconocido' }}</span>
                 <span class="scan-date">{{ fmtDate(analysis.finishedAt || analysis.startedAt) }}</span>
               </div>
 
               <p v-if="isRunning" class="state-msg">
-                El motor está pesando las pruebas… el resumen se actualizará solo al terminar.
+                Analizando el software instalado… el resumen se actualizará solo al terminar.
               </p>
 
               <template v-else>
                 <div class="totals">
                   <div class="total">
                     <span class="total-value">{{ analysis.vulnerableCount ?? 0 }}</span>
-                    <span class="total-label">con CVE conocida</span>
+                    <span class="total-label">con vulnerabilidad conocida</span>
                   </div>
                   <div class="total">
                     <span class="total-value">{{ analysis.confirmedCount ?? 0 }}</span>
@@ -132,7 +131,6 @@ function fmtDate(iso) {
 
 .summary-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem; }
 .mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
-.scan-id { font-size: var(--fs-md); color: var(--text-muted); }
 .scan-status { font-size: var(--fs-md); font-weight: 600; padding: 0.12rem 0.45rem; border-radius: 5px; }
 .scan-status.finished { color: var(--success); background: var(--success-dim); }
 .scan-status.running, .scan-status.pending { color: var(--info); background: var(--info-dim); }

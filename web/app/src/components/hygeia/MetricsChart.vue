@@ -136,7 +136,7 @@
 
     <p v-if="gaps.length || anomalyBands.length" class="plot-legend">
       <span v-if="gaps.length" class="legend-item"><i class="swatch swatch--gap"></i>sin señal</span>
-      <span v-if="anomalyBands.length" class="legend-item"><i class="swatch swatch--hostdown"></i>incidente host_down</span>
+      <span v-if="anomalyBands.length" class="legend-item"><i class="swatch swatch--hostdown"></i>caída detectada</span>
       <!-- Al final y empujada con margin-left:auto, para que quede al borde
            derecho por muchas entradas que tenga la leyenda. -->
       <span v-if="gapSummary" class="legend-total">{{ gapSummary }}</span>
@@ -146,10 +146,14 @@
       <span class="stat"><b>{{ maxLabel }}</b> máx</span>
       <span class="stat"><b>{{ avgLabel }}</b> media</span>
       <span class="stat"><b>{{ minLabel }}</b> mín</span>
-      <span class="stat stat--reads">{{ reads }}</span>
     </footer>
 
-    <p class="metric-window-note">{{ windowNote }}</p>
+    <!-- Cuántos puntos hay o de cuánto es cada cubo es cosa de cómo se
+         dibuja, no del equipo (CONVENCIONES.md § 12): no se cuenta. Lo único
+         que el usuario necesita saber es si le falta parte del periodo. -->
+    <p v-if="truncated" class="metric-window-note">
+      Hay más datos de los que caben: el gráfico muestra solo una parte del periodo.
+    </p>
     <p class="sr-only">{{ srText }}</p>
   </article>
 
@@ -168,7 +172,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useElementWidth } from '@/composables/useElementWidth'
-import { timeAgo } from './format'
+import { anomalyKindLabel, timeAgo } from './format'
 import {
   DEFAULT_WINDOW_MS, detectGaps, fmtDuration, formatTimeTick, formatValue,
   gapThresholdMs, medianDeltaMs, plotWidthForAxis, seriesOf, splitAtRanges, timeTicks,
@@ -313,7 +317,7 @@ const anomalyBands = computed(() =>
         ? Math.min(new Date(a.resolvedAt).getTime(), t1.value)
         : t1.value
       if (!Number.isFinite(start) || end <= start) return null
-      return { start, end, title: `host_down: ${fmtDuration(end - start)}` }
+      return { start, end, title: `Caída detectada · ${fmtDuration(end - start)}` }
     })
     .filter(Boolean)
 )
@@ -341,7 +345,7 @@ const anomalyMarks = computed(() =>
     .map((a) => {
       const at = new Date(a.openedAt).getTime()
       if (!Number.isFinite(at) || at < t0.value || at > t1.value) return null
-      return { at, title: `${a.kind} · ${formatValue(metric.value.fmt(a.value))}` }
+      return { at, title: `${anomalyKindLabel(a.kind)} · ${formatValue(metric.value.fmt(a.value))}` }
     })
     .filter(Boolean)
 )
@@ -359,25 +363,12 @@ const avgLabel = computed(() => formatValue(metric.value.fmt(
   values.value.reduce((a, b) => a + b, 0) / values.value.length,
 )))
 
-const reads = computed(() => {
-  const n = points.value.length
-  if (props.bucketSec) return n === 1 ? '1 cubo' : `${n} cubos`
-  return n === 1 ? '1 lectura' : `${n} lecturas`
-})
-
-const windowNote = computed(() => {
-  const span = fmtDuration(props.windowMs || DEFAULT_WINDOW_MS)
-  const bucket = props.bucketSec ? ` · cubos de ${fmtDuration(props.bucketSec * 1000)}` : ''
-  const cut = props.truncated ? ' · hay más histórico del que cabe' : ''
-  return `${span}${bucket}${cut}`
-})
-
 const srText = computed(() => {
   if (!metric.value || !points.value.length) return ''
   const gapsText = gaps.value.length
     ? `; ${gaps.value.length} tramo${gaps.value.length === 1 ? '' : 's'} sin señal${gapSummary.value ? `, ${gapSummary.value}` : ''}`
     : ''
-  return `${metric.value.name}: ${formatValue(current.value)} ahora, ${maxLabel.value} máximo, ${avgLabel.value} de media, ${minLabel.value} mínimo, sobre ${points.value.length} ${props.bucketSec ? 'cubos' : 'lecturas'}${gapsText}.`
+  return `${metric.value.name}: ${formatValue(current.value)} ahora, ${maxLabel.value} máximo, ${avgLabel.value} de media, ${minLabel.value} mínimo${gapsText}.`
 })
 
 /* ── Estados vacíos ── */
@@ -390,24 +381,25 @@ const srText = computed(() => {
 const hasPlottableData = computed(() => !!metric.value && points.value.length > 0)
 
 const emptyTitle = computed(() =>
-  props.snapshots.length ? `Sin datos de ${metric.value?.name ?? 'esta métrica'}` : 'Sin actividad en este tramo'
+  props.snapshots.length ? `Sin datos de ${metric.value?.name ?? 'esta métrica'}` : 'Sin datos en este periodo'
 )
 
 const emptySub = computed(() => {
   if (!props.snapshots.length) {
     const span = fmtDuration(props.windowMs || DEFAULT_WINDOW_MS)
-    return `El agente no ha reportado ningún heartbeat en las últimas ${span}. No es un fallo del panel: en esta ventana no hay nada que medir.`
+    return `El equipo no ha enviado datos en las últimas ${span}.`
   }
-  return `La métrica «${metric.value?.name ?? ''}» no aparece aquí — algunos agentes no la reportan (p. ej. la carga en Windows).`
+  return `Este equipo no envía «${metric.value?.name ?? ''}»: no todos los sistemas la miden (Windows, por ejemplo, no da la carga).`
 })
 
 /**
  * Pista de salida. Con una última señal conocida, dice cuándo fue; sin ella,
- * el activo nunca ha latido y ampliar la ventana no serviría de nada.
+ * el equipo nunca ha enviado nada, ampliar la ventana no serviría de nada y
+ * lo útil es mirar el agente.
  */
 const lastSeenNote = computed(() => {
   if (props.snapshots.length) return ''
-  if (!props.lastSeenAt) return 'Este activo todavía no ha enviado ningún heartbeat.'
+  if (!props.lastSeenAt) return 'Este equipo todavía no ha enviado ningún dato. Comprueba que el agente está instalado y en marcha.'
   return `Última señal ${timeAgo(props.lastSeenAt)}. Prueba con una ventana más amplia.`
 })
 
@@ -598,7 +590,7 @@ function formatTooltipTime(ts) {
   font-size: var(--fs-sm); color: var(--text-muted);
 }
 .legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
-/* La cifra se empuja al extremo opuesto, alineada con «N lecturas» del pie. */
+/* La cifra se empuja al extremo opuesto de la leyenda. */
 .legend-total {
   margin-left: auto;
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
@@ -620,8 +612,6 @@ function formatTooltipTime(ts) {
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-weight: 600;
   color: var(--text-dim); font-variant-numeric: tabular-nums;
 }
-.stat--reads { margin-left: auto; }
-
 .metric-window-note { margin: 0.3rem 0 0; text-align: right; font-size: var(--fs-sm); color: var(--text-muted); }
 
 /* ── Estados vacíos ── */

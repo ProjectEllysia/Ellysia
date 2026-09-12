@@ -7,10 +7,10 @@
     <header class="detail-head">
       <div class="head-id">
         <h3 class="detail-host">{{ asset.hostname }}</h3>
-        <p class="detail-seen">Último heartbeat {{ timeAgo(asset.lastSeenAt) }}</p>
+        <p class="detail-seen">Última señal {{ timeAgo(asset.lastSeenAt) }}</p>
       </div>
       <span class="status" :class="`status--${asset.status}`">
-        <span class="status-dot" aria-hidden="true"></span>{{ statusLabel(asset.status) }}
+        <span class="status-dot" aria-hidden="true"></span>{{ assetStatusLabel(asset.status) }}
       </span>
     </header>
 
@@ -53,10 +53,10 @@
          role="tabpanel" id="panel-graficas" aria-labelledby="tab-graficas" tabindex="0">
       <section class="section">
         <h4 class="section-title">Constantes</h4>
-        <!-- Silueta de una sola tarjeta de gráfica, con el alto real de la
-             nueva MetricsChart (cabecera, gráfico de 214px, eje X, pie y
-             nota de ventana). Si esa tarjeta cambia de alto, este número
-             deja de cuadrar y vuelve el salto. -->
+        <!-- Silueta de una sola tarjeta de gráfica, con el alto real de
+             MetricsChart (cabecera, gráfico de 214px, eje X, leyenda y pie).
+             Si esa tarjeta cambia de alto, este número deja de cuadrar y
+             vuelve el salto. -->
         <div v-if="metricsLoading" class="vitals-ghost" aria-busy="true" aria-label="Cargando métricas">
           <span class="skeleton vital-ghost" aria-hidden="true"></span>
         </div>
@@ -198,14 +198,14 @@
         <section v-if="nets.length" class="section">
           <h4 class="section-title">
             Red
-            <span class="hint">el gráfico suma solo las no-loopback</span>
+            <span class="hint">el gráfico no cuenta el tráfico interno del propio equipo</span>
           </h4>
           <ul class="rows">
             <li v-for="n in nets" :key="n.iface" class="row row--net">
               <span class="row-name" :title="n.iface">{{ n.iface }}</span>
               <span class="row-value">↓ {{ rate(n.rxBytesPerSec).text }} <small>{{ rate(n.rxBytesPerSec).unit }}</small></span>
               <span class="row-value">↑ {{ rate(n.txBytesPerSec).text }} <small>{{ rate(n.txBytesPerSec).unit }}</small></span>
-              <span v-if="errorsOf(n)" class="row-note row-note--bad">{{ errorsOf(n) }} err</span>
+              <span v-if="errorsOf(n)" class="row-note row-note--bad">{{ errorsOf(n) }} {{ errorsOf(n) === 1 ? 'error' : 'errores' }}</span>
             </li>
           </ul>
         </section>
@@ -290,13 +290,13 @@
                 <span class="analysis-text">
                   <template v-if="analysisRunning">Analizando el inventario…</template>
                   <template v-else-if="analysis.vulnerableCount">
-                    {{ analysis.vulnerableCount }} {{ analysis.vulnerableCount === 1 ? 'paquete' : 'paquetes' }} con CVE conocida
+                    {{ analysis.vulnerableCount }} {{ analysis.vulnerableCount === 1 ? 'paquete' : 'paquetes' }} con vulnerabilidades conocidas
                   </template>
                   <template v-else>Sin vulnerabilidades conocidas</template>
                 </span>
               </template>
               <span v-else class="analysis-text analysis-text--muted">
-                Sin analizar contra la base de vulnerabilidades
+                Aún no se han buscado vulnerabilidades
               </span>
             </div>
 
@@ -311,7 +311,7 @@
                 @click="$emit(hasAnalysis ? 'reanalyze' : 'analyze')"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: analyzing }"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                {{ hasAnalysis ? 'Volver a analizar' : 'Analizar con Lybra' }}
+                {{ hasAnalysis ? 'Volver a analizar' : 'Buscar vulnerabilidades' }}
               </button>
             </div>
           </div>
@@ -364,13 +364,15 @@
         <TransitionGroup v-else tag="ul" name="anomaly-row" class="anomalies">
           <li v-for="a in anomalies" :key="a.id" class="anomaly" :class="`anomaly--${a.severity}`">
             <div class="anomaly-top">
-              <span class="anomaly-kind">{{ kindLabel(a.kind) }}</span>
+              <span class="anomaly-kind">{{ anomalyKindLabel(a.kind) }}</span>
               <span class="anomaly-state" :class="`anomaly-state--${a.state}`">{{ stateLabel(a.state) }}</span>
             </div>
 
             <p v-if="a.metric" class="anomaly-reading">
               <span class="reading-value">{{ a.value }}%</span>
-              <span class="reading-ctx">{{ a.metric }} · umbral {{ a.threshold }}%</span>
+              <!-- Sin `a.metric`: es la clave interna (`cpu.usagePct`), y el
+                   tipo de arriba ya dice de qué métrica se trata. -->
+              <span class="reading-ctx">umbral {{ a.threshold }}%</span>
             </p>
 
             <p class="anomaly-time">Abierta {{ timeAgo(a.openedAt) }}</p>
@@ -395,7 +397,8 @@ import AssetTabs from '@/components/hygeia/AssetTabs.vue'
 import { WINDOW_PRESETS, bucketForWindow } from '@/components/hygeia/chartMath'
 import { useUtils } from '@/composables/useUtils'
 import {
-  classifyPower, describePowerPeriod, fmtBytes, fmtPct, fmtRate, fmtWatts, timeAgo,
+  anomalyKindLabel, assetStatusLabel, classifyPower, describePowerPeriod,
+  fmtBytes, fmtPct, fmtRate, fmtWatts, timeAgo,
 } from './format'
 
 const props = defineProps({
@@ -605,17 +608,15 @@ function free(disk) { return fmtBytes(disk.freeBytes) }
 function rate(value) { return fmtRate(value) }
 function errorsOf(iface) { return (iface.errIn ?? 0) + (iface.errOut ?? 0) }
 
-const STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inestable', offline: 'Caído' }
-function statusLabel(status) { return STATUS_LABELS[status] || status }
-
-const KIND_LABELS = {
-  cpu_spike: 'Pico de CPU', mem_high: 'Memoria alta', swap_thrash: 'Swap saturado',
-  disk_full: 'Disco lleno', host_down: 'Host caído',
-}
-function kindLabel(kind) { return KIND_LABELS[kind] || kind }
-
 const STATE_LABELS = { open: 'Abierta', acknowledged: 'Reconocida', resolved: 'Resuelta' }
-function stateLabel(state) { return STATE_LABELS[state] || state }
+
+/**
+ * Rótulo del estado de gestión de una anomalía.
+ *
+ * @param {string|null} state - `open`, `acknowledged` o `resolved`.
+ * @returns {string} El rótulo del estado, o «Desconocido» si no se conoce.
+ */
+function stateLabel(state) { return STATE_LABELS[state] || 'Desconocido' }
 </script>
 
 <style scoped>
@@ -641,11 +642,12 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-/* 380px es el alto medido de una .metric-card de MetricsChart (cabecera,
-   gráfico de 214px, eje X, leyenda, pie y nota de ventana). Si esa tarjeta
-   cambia de alto, este número deja de cuadrar y vuelve el salto. */
+/* 353px es el alto de una .metric-card de MetricsChart (cabecera, gráfico
+   de 214px, eje X, leyenda y pie), sin el aviso de serie recortada, que
+   solo aparece cuando falta parte del periodo. Si esa tarjeta cambia de
+   alto, este número deja de cuadrar y vuelve el salto. */
 .vitals-ghost { display: flex; flex-direction: column; gap: 0.85rem; }
-.vital-ghost { height: 380px; border-radius: 8px; }
+.vital-ghost { height: 353px; border-radius: 8px; }
 .inventory-ghost { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
 .status--pending { color: var(--text-muted); }
 .status--online  { color: var(--success); }

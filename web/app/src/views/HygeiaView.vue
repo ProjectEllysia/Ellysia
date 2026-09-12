@@ -90,7 +90,7 @@
     <ConfirmModal
       :show="!!pendingDeleteId"
       title="Eliminar activo"
-      message="Se eliminará el activo y se revocará su clave de agente. Los heartbeats que llegue con esa clave dejarán de aceptarse."
+      message="Se eliminará el activo y se revocará su clave de agente. El agente instalado en ese equipo dejará de poder enviar datos."
       confirm-label="Eliminar"
       danger
       @confirm="handleDeleteConfirm"
@@ -430,7 +430,7 @@ async function handleAnalyze() {
   if (!id) return
   const scanId = await store.analyzeInventory(id)
   toast.show(
-    scanId ? `Análisis iniciado (escaneo ${scanId}). El resumen se actualizará al terminar.`
+    scanId ? 'Análisis iniciado. El resumen se actualizará al terminar.'
            : (store.state.analysisError || 'No se pudo lanzar el análisis.'),
     scanId ? 'success' : 'error',
   )

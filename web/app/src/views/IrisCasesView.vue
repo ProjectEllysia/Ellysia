@@ -115,7 +115,7 @@
               <button type="button" class="link-btn" @click="openAnalysis(analysis.analysisId)">
                 #{{ analysis.analysisId }} · {{ analysis.title || '(sin título)' }}
               </button>
-              <span class="case-meta">{{ analysis.verdict || analysis.status }} · {{ analysis.totalScore ?? '—' }}</span>
+              <span class="case-meta">{{ analysis.verdict ? verdictLabel(analysis.verdict) : analysisStatusLabel(analysis.status) }} · {{ analysis.totalScore ?? '—' }}</span>
               <button type="button" class="ghost-btn ghost-btn--small" @click="store.unlinkCaseAnalysis(detail.caseId, analysis.analysisId)">Quitar</button>
             </li>
           </ul>
@@ -148,6 +148,7 @@ import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import { useIrisStore } from '@/stores/irisStore'
 import { useUtils } from '@/composables/useUtils'
+import { analysisStatusLabel, verdictLabel } from '@/components/iris/verdict'
 
 const store = useIrisStore()
 const router = useRouter()

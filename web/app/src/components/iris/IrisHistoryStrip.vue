@@ -46,7 +46,7 @@
           <span v-if="item.verdict && item.status === 'finished'" class="strip-verdict" :class="`verdict--${verdictClass(item.verdict)}`">
             {{ item.totalScore }}
           </span>
-          <span v-else-if="item.status === 'running' || item.status === 'pending'" class="strip-status">{{ item.status }}</span>
+          <span v-else-if="item.status === 'running' || item.status === 'pending'" class="strip-status">{{ analysisStatusLabel(item.status) }}</span>
         </button>
 
         <!-- Delete button (visible on hover) -->
@@ -103,11 +103,11 @@
         </div>
         <div class="card-row" v-if="hoverItem.verdict && hoverItem.status === 'finished'">
           <span class="card-label">Veredicto</span>
-          <span class="card-verdict" :class="`v--${verdictClass(hoverItem.verdict)}`">{{ hoverItem.verdict }}</span>
+          <span class="card-verdict" :class="`v--${verdictClass(hoverItem.verdict)}`">{{ verdictLabel(hoverItem.verdict) }}</span>
         </div>
         <div class="card-row" v-else-if="hoverItem.status !== 'finished'">
           <span class="card-label">Estado</span>
-          <span class="card-value card-value--status">{{ statusLabel(hoverItem.status) }}</span>
+          <span class="card-value card-value--status">{{ analysisStatusLabel(hoverItem.status) }}</span>
         </div>
       </div>
     </Transition>
@@ -125,6 +125,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { analysisStatusLabel, verdictClass, verdictLabel } from '@/components/iris/verdict'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -209,14 +210,6 @@ function formatDate(iso) {
   catch { return iso }
 }
 
-function statusLabel(s) {
-  if (s === 'running') return 'En análisis'
-  if (s === 'pending') return 'Pendiente'
-  if (s === 'failed') return 'Fallido'
-  if (s === 'cancelled') return 'Cancelado'
-  return s || ''
-}
-
 function scoreClass(s) {
   if (s == null) return ''
   if (s > 0) return 'score--pos'
@@ -234,15 +227,6 @@ function originLabel(item) {
   const providerNames = { microsoft: 'Microsoft 365', gmail: 'Gmail' }
   const provider = providerNames[item.provider] || item.provider || 'Buzón'
   return item.accountEmail ? `${provider} (${item.accountEmail})` : provider
-}
-
-function verdictClass(v) {
-  if (!v) return 'unknown'
-  const l = v.toLowerCase()
-  if (l === 'legitimate') return 'legit'
-  if (l === 'suspicious') return 'susp'
-  if (l === 'phishing') return 'phish'
-  return 'unknown'
 }
 </script>
 

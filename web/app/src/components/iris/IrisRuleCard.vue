@@ -3,12 +3,14 @@
     <button type="button" class="rule-header" @click="$emit('toggle')">
       <div class="rule-left">
         <span class="rule-name">{{ rule.ruleName }}</span>
-        <span class="rule-category" v-if="rule.category">{{ rule.category }}</span>
+        <span class="rule-category" v-if="rule.category">{{ ruleCategoryLabel(rule.category) }}</span>
         <span v-if="rule.severity" class="rule-severity" :class="`rule-severity--${rule.severity}`">{{ SEVERITY_LABELS[rule.severity] || rule.severity }}</span>
       </div>
       <div class="rule-right">
         <span class="rule-score" :class="scoreClass(rule.score, rule.verdict)">{{ sign(rule.score) }}{{ rule.score }}</span>
-        <span class="rule-verdict" :class="`verdict-chip--${rule.verdict}`">{{ rule.verdict }}</span>
+        <!-- El código exacto (`softfail`, `bestguess`…) es lo que busca un
+             técnico: se queda en el tooltip, no en la primera lectura. -->
+        <span class="rule-verdict" :class="`verdict-chip--${rule.verdict}`" :title="`Código: ${rule.verdict}`">{{ ruleVerdictLabel(rule.verdict) }}</span>
         <svg class="rule-chevron" :class="{ rotated: expanded }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
     </button>
@@ -68,6 +70,8 @@
 </template>
 
 <script setup>
+import { ruleCategoryLabel, ruleVerdictLabel } from '@/components/iris/verdict'
+
 defineProps({
   rule: { type: Object, required: true },
   expanded: { type: Boolean, default: false },
@@ -93,7 +97,7 @@ function evidenceLabel(item) {
   if (item.kind === 'attachment') return 'Adjunto'
   if (item.kind === 'body') return 'Cuerpo'
   if (item.kind === 'mime_part') return 'Parte MIME'
-  return item.kind
+  return 'Evidencia'
 }
 
 function sign(s) {
