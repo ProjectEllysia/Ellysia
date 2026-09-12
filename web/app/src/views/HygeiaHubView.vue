@@ -46,12 +46,12 @@ const online = ref(0)
 
 const features = [
   {
-    kicker: 'Push, no pull',
-    title: 'El agente empuja, tú no sondeas',
-    desc: 'Un agente ligero envía heartbeats cada pocos segundos — funciona detrás de NAT, sin abrir ningún puerto en el activo.',
+    kicker: 'Sin abrir puertos',
+    title: 'El equipo avisa, tú no preguntas',
+    desc: 'Un agente ligero informa cada pocos segundos, también detrás del router de la oficina, sin abrir ningún puerto en el equipo.',
   },
   {
-    kicker: 'Umbrales con histéresis',
+    kicker: 'Alertas sin ruido',
     title: 'Una alerta, no un aluvión',
     desc: 'CPU, memoria, disco y swap se vigilan con umbrales configurables; una anomalía se abre una vez y se resuelve sola al normalizarse.',
   },

@@ -67,7 +67,7 @@
 
     <div v-else-if="!assets.length" class="state-empty">
       <p class="empty-title">Ningún activo todavía</p>
-      <p class="empty-sub">Da de alta el primero para empezar a recibir sus heartbeats.</p>
+      <p class="empty-sub">Da de alta el primero para empezar a vigilarlo.</p>
       <button class="btn-new" @click="$emit('create')">Nuevo activo</button>
     </div>
 
@@ -148,7 +148,7 @@ import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import TagBadge from './TagBadge.vue'
 import { hueOf } from './tagColors'
-import { timeAgo } from './format'
+import { assetStatusLabel, timeAgo } from './format'
 
 const props = defineProps({
   assets: { type: Array, default: () => [] },
@@ -203,8 +203,6 @@ function shownTags(asset) {
   return (asset.tags ?? []).slice(0, MAX_ROW_TAGS)
 }
 
-const STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inestable', offline: 'Caído' }
-
 /**
  * Un activo que se apaga a propósito no está "caído": pintarlo en rojo sería
  * exactamente el ruido que su marca elimina. El estado es el mismo (`offline`),
@@ -212,7 +210,7 @@ const STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inest
  */
 function statusLabel(asset) {
   if (asset.status === 'offline' && asset.isPersistent === false) return 'Apagado'
-  return STATUS_LABELS[asset.status] || asset.status
+  return assetStatusLabel(asset.status)
 }
 
 function pulseClass(asset) {

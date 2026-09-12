@@ -10,7 +10,7 @@
 import {
   fmtBytes, fmtRate, fmtUptime, fmtPct, fmtLoad1,
   fmtWatts, classifyPower, fmtEnergy, fmtCost, describePowerPeriod,
-  anomalyKindLabel,
+  anomalyKindLabel, assetStatusLabel,
 } from '../src/components/hygeia/format.js'
 
 let passed = 0
@@ -127,6 +127,10 @@ console.log('\nanomalyKindLabel')
 eq('tipo conocido', anomalyKindLabel('host_down'), 'Host caído')
 eq('tipo desconocido: rótulo genérico, nunca el identificador crudo', anomalyKindLabel('disk_io_high'), 'Anomalía')
 eq('sin tipo', anomalyKindLabel(null), 'Anomalía')
+
+console.log('\nassetStatusLabel')
+eq('estado conocido', assetStatusLabel('stale'), 'Inestable')
+eq('estado desconocido: rótulo genérico, nunca el valor crudo', assetStatusLabel('degraded'), 'Desconocido')
 
 console.log(`\n${passed} pasados, ${failed} fallidos\n`)
 process.exit(failed === 0 ? 0 : 1)

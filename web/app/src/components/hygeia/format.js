@@ -239,6 +239,22 @@ export function describePowerPeriod(period) {
   }
 }
 
+const ASSET_STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inestable', offline: 'Caído' }
+
+/**
+ * Rótulo en castellano del estado de conexión de un activo.
+ *
+ * Solo traduce el estado: el matiz de «Apagado» para un activo que se apaga
+ * a propósito depende también de `isPersistent`, y lo resuelve la lista.
+ *
+ * @param {string|null} status - Estado del servidor: `pending`, `online`,
+ *   `stale` u `offline`.
+ * @returns {string} El rótulo del estado, o «Desconocido» si no se conoce.
+ */
+export function assetStatusLabel(status) {
+  return ASSET_STATUS_LABELS[status] || 'Desconocido'
+}
+
 const ANOMALY_KIND_LABELS = {
   cpu_spike: 'Pico de CPU', mem_high: 'Memoria alta', swap_thrash: 'Swap saturado',
   disk_full: 'Disco lleno', host_down: 'Host caído',
