@@ -1,7 +1,8 @@
 # Convenciones de código — Ellysia
 
 Este documento responde a una sola pregunta: **si tengo que crear esto, ¿dónde lo creo, cómo lo creo
-y qué entidad le doy?** Cubre el backend (`API/`), que es donde vive casi todo el código.
+y qué entidad le doy?** Cubre el backend (`API/`), que es donde vive casi todo el código; los textos
+que el SPA pone delante del usuario tienen su propia sección ([§ 12](#12-textos-de-la-interfaz)).
 
 Lo operativo —comandos, arquitectura, configuración, «cosas que muerden»— sigue en
 [`CLAUDE.md`](CLAUDE.md). La regla de docstrings también vive allí (§ *Documentación de funciones,
@@ -26,6 +27,7 @@ lista, se adapta en el mismo cambio.
 9. [Constantes y configuración](#9-constantes-y-configuración)
 10. [Nombres](#10-nombres)
 11. [Estado actual y cumplimiento](#11-estado-actual-y-cumplimiento)
+12. [Textos de la interfaz](#12-textos-de-la-interfaz)
 
 ---
 
@@ -49,6 +51,7 @@ lista, se adapta en el mismo cambio.
 | Una excepción de dominio | clase `<Algo>Error` | `<módulo>/exceptions.py` |
 | Hablar con un proveedor de IA o de correo | estrategia | `tools/scribe/` o `tools/herald/` |
 | Un módulo de feature nuevo | paquete completo ([§ 3.1](#31-anatomía-de-un-módulo)) | `features/<nombre>/` + blueprint en `run.py` + `web/Caddyfile` + `web/app/vite.config.js` |
+| Un texto que ve el usuario (etiqueta, aviso, estado vacío, tooltip) | lenguaje del usuario; los enums, por un rótulo compartido | el `.vue` + `web/app/src/components/<módulo>/<tema>.js` ([§ 12](#12-textos-de-la-interfaz)) |
 
 ---
 
@@ -971,3 +974,72 @@ comprueba los dos sentidos:
 - que detecta un caso que debe detectar, como un `uow.session.add(x)` dentro de un manager;
 - que no detecta uno que no debe, como la misma llamada dentro de un `FooRepository`, o un
   `_método` abstracto.
+
+---
+
+## 12. Textos de la interfaz
+
+La única sección que no trata del backend. Rige todo lo que el SPA (`web/app/`) pone delante del
+usuario: etiquetas, leyendas, avisos, estados vacíos, tooltips, toasts y el texto accesible
+(`aria-label`, `.sr-only`).
+
+La interfaz la usan personas técnicas y no técnicas. Enseñarles cómo funciona Ellysia por dentro no
+ayuda a ninguna de las dos: a quien no es técnico le confunde, y a quien lo es le añade ruido visual
+sin darle ninguna decisión que tomar.
+
+### 12.1 La pregunta que decide
+
+**¿Esto describe algo del usuario —su equipo, su correo, su escaneo— o describe cómo funciona
+Ellysia?**
+
+- **Del usuario** → se muestra, con su nombre estándar. CPU, swap, kernel, el PID de un proceso, un
+  puerto abierto, SPF o una CVE son hechos de lo que el usuario vigila, y un técnico los busca por
+  ese nombre. No se rebajan.
+- **De Ellysia** → no llega a la pantalla.
+
+| Vocabulario de implementación | Así no | Así sí |
+|---|---|---|
+| Cómo se agregan o se muestrean los datos | «235 cubos», «cubos de 5 min» | nada: la gráfica ya enseña el periodo |
+| Cómo viajan los datos | «Último heartbeat hace 4 s» | «Última señal hace 4 s» |
+| Valores de enum y claves internas | `host_down`, `cpu.usagePct`, `content_analysis` | su rótulo: «caída detectada», «Contenido» |
+| Estados y códigos en inglés | `running`, `Suspicious` | «En análisis», «Sospechoso» |
+| Ids internos que el usuario no usa para nada | «Análisis iniciado (escaneo 1234)» | «Análisis iniciado» |
+| Motores y piezas internas fuera de la pantalla que los presenta | «Analizar con Lybra» en Hygeia, «el motor está pesando las pruebas» | lo que hace: «Buscar vulnerabilidades» |
+| La herramienta hablando de sí misma | «No es un fallo del panel» | hablar del equipo: «en este periodo no ha enviado datos» |
+
+Un id sí se muestra cuando es la forma de referirse a algo que no tiene otro nombre («Análisis
+#12» si no tiene título). Lo que sobra es el id que acompaña a un texto que ya se entiende sin él.
+
+### 12.2 Todo valor de enum pasa por un rótulo
+
+- Un valor que el servidor manda de un conjunto cerrado (estado, tipo, veredicto, categoría) se
+  pinta **siempre** a través de un mapa valor → rótulo en castellano. Nunca `{{ item.status }}`.
+- Un valor que el mapa no conoce cae en un **rótulo genérico** («Anomalía», «Desconocido»), nunca
+  en el crudo. `LABELS[value] || value` es justo lo que no: el día que el servidor añada un valor
+  nuevo, la pantalla tiene que seguir leyéndose en castellano.
+- Un mapa que usan varios componentes vive en un fichero compartido del módulo del SPA
+  (`components/<módulo>/<tema>.js`), no copiado en cada `.vue`. Las copias locales divergen, y
+  cuando se traduce una, la de al lado sigue en inglés. Es la escalera de
+  [§ 6.2](#62-la-escalera-dónde-vive-una-función-según-quién-la-use) aplicada al frontend; ejemplos:
+  `components/hygeia/format.js`, `components/iris/verdict.js`.
+
+### 12.3 El detalle técnico, en segunda capa
+
+Lo que sí le sirve a un usuario técnico —el código exacto de un resultado SPF, el id estable de una
+regla, la fuente de un sensor— no se elimina: baja a una segunda capa que el usuario tiene que pedir
+(el `title` de un elemento, un detalle desplegado). La primera lectura es para todos; la segunda,
+para quien la busca.
+
+### 12.4 Qué queda fuera
+
+- **Vistas de operador** (`ConfigView`, `QueueView`, `LogsView`, `AdminPlansView`,
+  `IrisReplayView`). Las usa quien opera el despliegue, y ahí «workers», «Redis» o «latidos
+  sostenidos» son precisamente lo que se configura.
+- **Lo que el usuario tiene que copiar a otro sistema.** La clave de agente y su fragmento de
+  configuración son el dato, no ruido.
+- **El código.** La regla es sobre lo que ve el usuario: dentro del código, `bucketSec` sigue
+  llamándose `bucketSec` y los comentarios siguen siendo técnicos.
+
+Ningún test la hace cumplir, a propósito: es una regla de significado, no de sintaxis, y una lista
+negra de palabras sobre las plantillas daría una falsa sensación de cobertura (los textos se montan
+tanto en la plantilla como en el script). Se aplica en la revisión.
