@@ -415,7 +415,10 @@ onMounted(async () => {
 .panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .panel--pills     { flex: 0 0 300px; background: var(--surface); border-right: 1px solid var(--border-med); }
 .panel--campaigns { flex: 0 0 380px; background: var(--surface); border-right: 1px solid var(--border-med); }
-.panel--detail    { flex: 1 1 0%; background: var(--surface-2); overflow-y: auto; padding: 1.4rem 1.75rem 2rem; }
+/* El detalle es un bloque y no una columna flex: es una página que se
+   desplaza, y como hijo flex el contenedor de la tabla (overflow-x: auto)
+   perdía su alto mínimo y se encogía hasta dejar la tabla invisible. */
+.panel--detail    { display: block; flex: 1 1 0%; background: var(--surface-2); overflow-y: auto; padding: 1.4rem 1.75rem 2rem; }
 .panel-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; padding: 0.4rem; }
 
 .panel--pills     { animation: seq-fade-up 0.45s ease-out backwards; }
