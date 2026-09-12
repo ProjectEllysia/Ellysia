@@ -45,9 +45,9 @@ export const SERIES = [
     fixedMax: 100, minSpan: 6,    fmt: PCT },
   // Entrada y salida comparten tono a propósito: son la misma magnitud en
   // dos sentidos, y la paleta no tiene seis matices distintos que repartir.
-  { key: 'net-rx', name: 'Red · in',  field: 'netRxBps',  color: 'var(--success)',
+  { key: 'net-rx', name: 'Red · entrada', field: 'netRxBps', color: 'var(--success)',
     fixedMax: null, minSpan: 8192, fmt: fmtRate },
-  { key: 'net-tx', name: 'Red · out', field: 'netTxBps',
+  { key: 'net-tx', name: 'Red · salida', field: 'netTxBps',
     color: 'color-mix(in srgb, var(--success) 50%, var(--text-muted))',
     fixedMax: null, minSpan: 8192, fmt: fmtRate },
   { key: 'load1',  name: 'Carga',     field: 'load1',     color: 'var(--accent)',

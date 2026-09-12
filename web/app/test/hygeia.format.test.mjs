@@ -10,6 +10,7 @@
 import {
   fmtBytes, fmtRate, fmtUptime, fmtPct, fmtLoad1,
   fmtWatts, classifyPower, fmtEnergy, fmtCost, describePowerPeriod,
+  anomalyKindLabel,
 } from '../src/components/hygeia/format.js'
 
 let passed = 0
@@ -121,6 +122,11 @@ eq('periodo proyectado', describePowerPeriod({
   kwh: 30, cost: 4.5, currency: 'EUR', classification: 'projected', coverageFraction: null,
 }).classificationLabel, 'Proyección')
 eq('periodo nulo no rompe', describePowerPeriod(null), null)
+
+console.log('\nanomalyKindLabel')
+eq('tipo conocido', anomalyKindLabel('host_down'), 'Host caído')
+eq('tipo desconocido: rótulo genérico, nunca el identificador crudo', anomalyKindLabel('disk_io_high'), 'Anomalía')
+eq('sin tipo', anomalyKindLabel(null), 'Anomalía')
 
 console.log(`\n${passed} pasados, ${failed} fallidos\n`)
 process.exit(failed === 0 ? 0 : 1)
