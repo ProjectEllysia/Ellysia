@@ -109,8 +109,6 @@ export const useAegisStore = defineStore('aegis', () => {
   const loadingCampaigns = ref(false)
   /** Error al cargar el listado de campañas (null = sin error) */
   const campaignsError = ref(null)
-  /** Campañas de la píldora abierta en el visor */
-  const campaignsForDoc = computed(() => campaigns.value.filter(c => c.documentId === currentDocId.value))
   /** Creación de una lista nueva en curso */
   const creatingList = ref(false)
   /** Lanzamiento de campaña en curso */
@@ -480,8 +478,8 @@ export const useAegisStore = defineStore('aegis', () => {
 
   /**
    * Abre el modal de campaña para la píldora actualmente en el visor y
-   * precarga las listas de distribución y las campañas del usuario (de ellas
-   * sale `campaignsForDoc`).
+   * precarga las listas de distribución y las campañas del usuario (el modal
+   * cuenta las de la píldora para enlazar a la vista de campañas).
    *
    * @returns {Promise<void>} Se resuelve cuando ambas cargas han terminado.
    */
@@ -493,7 +491,6 @@ export const useAegisStore = defineStore('aegis', () => {
   /** Cierra el modal de campaña */
   function closeCampaignModal() {
     campaignModalOpen.value = false
-    campaignDetail.value = null
   }
 
   /** Carga las listas de distribución del usuario desde GET /aegis/lists */
@@ -779,7 +776,7 @@ export const useAegisStore = defineStore('aegis', () => {
     loadDocument, closeViewer, deleteDocument, downloadExport, previewMarkdown,
     startEdit, cancelEdit, savePill,
     campaignModalOpen, distributionLists, loadingLists,
-    campaigns, loadingCampaigns, campaignsError, campaignsForDoc,
+    campaigns, loadingCampaigns, campaignsError,
     creatingList, launchingCampaign, campaignDetail, loadingCampaignDetail, deletingCampaign,
     openCampaignModal, closeCampaignModal, loadDistributionLists, loadCampaigns,
     createDistributionListWithRecipients, launchNewCampaign, loadCampaignDetail, deleteCampaign,
