@@ -103,14 +103,23 @@ export const useAegisStore = defineStore('aegis', () => {
   const distributionLists = ref([])
   /** Carga de listas en curso */
   const loadingLists = ref(false)
-  /** Campañas ya lanzadas para la píldora abierta en el modal */
-  const campaignsForDoc = ref([])
+  /** Todas las campañas del usuario, cada una con su resumen de progreso */
+  const campaigns = ref([])
+  /** Carga del listado de campañas en curso */
+  const loadingCampaigns = ref(false)
+  /** Error al cargar el listado de campañas (null = sin error) */
+  const campaignsError = ref(null)
+  /** Campañas de la píldora abierta en el visor */
+  const campaignsForDoc = computed(() => campaigns.value.filter(c => c.documentId === currentDocId.value))
   /** Creación de una lista nueva en curso */
   const creatingList = ref(false)
   /** Lanzamiento de campaña en curso */
   const launchingCampaign = ref(false)
-  /** Campaña desplegada en el modal, con sus destinatarios y notas */
+  /** Campaña cuyo detalle se está viendo, con sus destinatarios y notas */
   const campaignDetail = ref(null)
+  /** Turno de la última petición de detalle: descarta las respuestas que
+      lleguen tarde si se ha pedido otra campaña entre medias */
+  let campaignDetailRequest = 0
   /** Carga del detalle de campaña en curso */
   const loadingCampaignDetail = ref(false)
   /** Eliminación de campaña en curso */
@@ -471,14 +480,14 @@ export const useAegisStore = defineStore('aegis', () => {
 
   /**
    * Abre el modal de campaña para la píldora actualmente en el visor y
-   * precarga las listas de distribución + las campañas ya lanzadas para ella.
+   * precarga las listas de distribución y las campañas del usuario (de ellas
+   * sale `campaignsForDoc`).
+   *
+   * @returns {Promise<void>} Se resuelve cuando ambas cargas han terminado.
    */
   async function openCampaignModal() {
     campaignModalOpen.value = true
-    await Promise.all([
-      loadDistributionLists(),
-      currentDocId.value ? loadCampaignsForDocument(currentDocId.value) : Promise.resolve(),
-    ])
+    await Promise.all([loadDistributionLists(), loadCampaigns()])
   }
 
   /** Cierra el modal de campaña */
@@ -499,41 +508,59 @@ export const useAegisStore = defineStore('aegis', () => {
   }
 
   /**
-   * Carga las campañas ya lanzadas para una píldora concreta.
-   * GET /aegis/campaigns no filtra por documento: se filtra en cliente.
-   * @param {number|string} documentId
+   * Carga todas las campañas del usuario (GET /aegis/campaigns), de la más
+   * reciente a la más antigua y cada una con su resumen de progreso
+   * (`recipientCount`, `openedCount`, `completedCount`, `averageScore`). El
+   * servidor no filtra por píldora: las de una concreta se filtran en cliente.
+   *
+   * @returns {Promise<void>} Deja el resultado en `campaigns`; si falla, lo
+   *   vacía y deja el motivo en `campaignsError`.
    */
-  async function loadCampaignsForDocument(documentId) {
+  async function loadCampaigns() {
+    loadingCampaigns.value = true
     try {
       const res = await apiFetch('/aegis/campaigns')
-      if (!res?.ok) { campaignsForDoc.value = []; return }
+      if (!res?.ok) { campaigns.value = []; campaignsError.value = 'No se pudieron cargar las campañas.'; return }
       const data = await res.json()
-      campaignsForDoc.value = (data.campaigns ?? []).filter(c => c.documentId === documentId)
-    } catch { campaignsForDoc.value = [] }
+      campaigns.value = data.campaigns ?? []
+      campaignsError.value = null
+    } catch {
+      campaigns.value = []
+      campaignsError.value = 'Error de conexión.'
+    } finally { loadingCampaigns.value = false }
   }
 
   /**
-   * Carga el detalle de una campaña (GET /aegis/campaigns/{id}), que incluye
-   * cada destinatario con su estado (sent/opened/completed) y su nota.
-   * Llamar con el mismo id que ya está abierto lo cierra.
-   * @param {number|string} campaignId
+   * Carga el detalle de una campaña (GET /aegis/campaigns/{id}): cada
+   * destinatario con su estado (sent/opened/completed), sus fechas y su nota.
+   * Si mientras tanto se pide otra campaña, la respuesta de esta se descarta.
+   *
+   * @param {number} campaignId - Id de la campaña.
+   * @returns {Promise<void>} Deja el resultado en `campaignDetail`; si falla,
+   *   lo deja a null y avisa con un toast.
    */
   async function loadCampaignDetail(campaignId) {
-    if (campaignDetail.value?.id === campaignId) { campaignDetail.value = null; return }
+    const request = ++campaignDetailRequest
     loadingCampaignDetail.value = true
     campaignDetail.value = null
     try {
       const res = await apiFetch(`/aegis/campaigns/${campaignId}`)
+      if (request !== campaignDetailRequest) return
       if (!res?.ok) { toast.show('No se pudo cargar el detalle de la campaña.', 'error'); return }
-      campaignDetail.value = await res.json()
-    } finally { loadingCampaignDetail.value = false }
+      const detail = await res.json()
+      if (request === campaignDetailRequest) campaignDetail.value = detail
+    } finally {
+      if (request === campaignDetailRequest) loadingCampaignDetail.value = false
+    }
   }
 
   /**
    * Elimina una campaña (DELETE /aegis/campaigns/{id}) y su tracking —
-   * invalida cualquier enlace de quiz que ya se hubiera enviado. Devuelve
-   * true si se eliminó.
-   * @param {number|string} campaignId
+   * invalida cualquier enlace de quiz que ya se hubiera enviado.
+   *
+   * @param {number} campaignId - Id de la campaña.
+   * @returns {Promise<boolean>} true si se eliminó; false si el servidor la
+   *   rechazó (se avisa con un toast).
    */
   async function deleteCampaign(campaignId) {
     deletingCampaign.value = true
@@ -541,7 +568,7 @@ export const useAegisStore = defineStore('aegis', () => {
       const res = await apiFetch(`/aegis/campaigns/${campaignId}`, { method: 'DELETE' })
       if (!res?.ok) { toast.show('No se pudo eliminar la campaña.', 'error'); return false }
       if (campaignDetail.value?.id === campaignId) campaignDetail.value = null
-      campaignsForDoc.value = campaignsForDoc.value.filter(c => c.id !== campaignId)
+      campaigns.value = campaigns.value.filter(c => c.id !== campaignId)
       toast.show('Campaña eliminada.', 'success')
       return true
     } finally { deletingCampaign.value = false }
@@ -682,7 +709,7 @@ export const useAegisStore = defineStore('aegis', () => {
       }
 
       toast.show('Campaña lanzada. El envío continúa en segundo plano.', 'success')
-      await loadCampaignsForDocument(documentId)
+      await loadCampaigns()
       return true
     } finally { launchingCampaign.value = false }
   }
@@ -727,7 +754,9 @@ export const useAegisStore = defineStore('aegis', () => {
     campaignModalOpen.value = false
     distributionLists.value = []
     loadingLists.value = false
-    campaignsForDoc.value = []
+    campaigns.value = []
+    loadingCampaigns.value = false
+    campaignsError.value = null
     creatingList.value = false
     launchingCampaign.value = false
     campaignDetail.value = null
@@ -749,9 +778,10 @@ export const useAegisStore = defineStore('aegis', () => {
     loadTopics, loadOrgProfile, saveOrgProfile, loadHistory, sortedDocuments, generate,
     loadDocument, closeViewer, deleteDocument, downloadExport, previewMarkdown,
     startEdit, cancelEdit, savePill,
-    campaignModalOpen, distributionLists, loadingLists, campaignsForDoc,
+    campaignModalOpen, distributionLists, loadingLists,
+    campaigns, loadingCampaigns, campaignsError, campaignsForDoc,
     creatingList, launchingCampaign, campaignDetail, loadingCampaignDetail, deletingCampaign,
-    openCampaignModal, closeCampaignModal, loadDistributionLists,
+    openCampaignModal, closeCampaignModal, loadDistributionLists, loadCampaigns,
     createDistributionListWithRecipients, launchNewCampaign, loadCampaignDetail, deleteCampaign,
     listsModalOpen, listRecipients, expandedListId,
     openListsModal, closeListsModal, toggleListRecipients,

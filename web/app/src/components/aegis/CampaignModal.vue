@@ -78,7 +78,7 @@ bob@empresa.com"
                     type="button"
                     class="past-campaign-row-main"
                     :aria-expanded="store.campaignDetail?.id === c.id"
-                    @click="store.loadCampaignDetail(c.id)"
+                    @click="toggleDetail(c.id)"
                   >
                     <span class="badge" :class="statusBadgeClass(c.status)">{{ statusLabel(c.status) }}</span>
                     <span class="past-campaign-name">{{ c.name }}</span>
@@ -230,6 +230,16 @@ async function handleLaunch() {
 function close() { emit('close') }
 
 useModalA11y(() => true, { boxRef, onClose: close })
+
+/**
+ * Despliega los resultados de una campaña anterior, o los pliega si ya estaban abiertos.
+ *
+ * @param {number} campaignId - Id de la campaña pulsada.
+ */
+function toggleDetail(campaignId) {
+  if (store.campaignDetail?.id === campaignId) store.campaignDetail = null
+  else store.loadCampaignDetail(campaignId)
+}
 
 const deleteTarget = ref(null)
 async function confirmDelete() {

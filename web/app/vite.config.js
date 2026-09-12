@@ -66,6 +66,7 @@ export default defineConfig(({ mode }) => {
 const FRONTEND_SUBROUTES = new Set([
   '/themis/escaneos',
   '/aegis/generador',
+  '/aegis/campanas',
   '/iris/analisis',
   '/iris/conexiones',
   '/acheron/boveda',
