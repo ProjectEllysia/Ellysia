@@ -1,14 +1,35 @@
 name: Tests
 
+# OJO: deploy.yml se engancha a este workflow por su NOMBRE ("Tests") y
+# despliega cuando termina en verde sobre un push a main. Renombrarlo sin
+# tocar aquella línea deja el despliegue sin disparador.
+#
+# Cuándo corre, pensado para gastar los minutos de Actions solo donde deciden
+# algo:
+# - En los PR hacia main, las ramas de versión (vX.Y) y las de proyecto. Un PR
+#   prueba el merge de su rama con la base, así que mergearlo no necesita otra
+#   pasada: el push a una rama de versión ya no dispara nada.
+# - En el push a main, y solo ahí, porque es la puerta del despliegue.
+# - Nunca en un PR en borrador: corre cuando se marca como listo.
 on:
   push:
-    branches: [main, 'v[0-9]+.[0-9]+', 'proyecto/**']
+    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, 'v[0-9]+.[0-9]+', 'proyecto/**']
+
+# Un push nuevo a un PR deja obsoleta la pasada anterior, y se cancela. En main
+# no: cada push a main es un despliegue y su pasada tiene que terminar.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tests:
+    if: github.event_name == 'push' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    # Sin tope, un test colgado puede consumir hasta seis horas de minutos.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: API
@@ -25,8 +46,39 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # En un PR se comprueba el merge con la base; su primer padre es la
+          # base, y hace falta para saber qué ficheros cambia el PR.
+          fetch-depth: 2
+
+      - name: ¿El cambio afecta a la API?
+        id: changes
+        working-directory: .
+        run: |
+          # En main se prueba todo siempre: es la puerta del despliegue.
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          # Se salta solo si TODO lo que cambia es ajeno a la suite: Markdown,
+          # la landing o el SPA. Del SPA hay ficheros que la suite sí lee,
+          # porque ata contratos entre las dos mitades del repositorio:
+          # test_caddy_api_routes lee el router, test_config_view_paths lee
+          # ConfigView.vue y test_scan_failure_reason, los componentes de Themis.
+          relevant=$(
+            printf '%s\n' "$changed" | grep -vE '\.md$|^landing/|^web/app/' || true
+            printf '%s\n' "$changed" | grep -E '^web/app/src/(router/|views/ConfigView\.vue|components/themis/)' || true
+          )
+          if [ -n "$relevant" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::El PR no toca nada que lea la suite de la API; se salta."
+          fi
 
       - name: Set up Python
+        if: steps.changes.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -36,24 +88,46 @@ jobs:
             API/requirements-dev.txt
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+        if: steps.changes.outputs.run == 'true'
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run test suite
-        run: python -m pytest -q -m "not oracle"
+        if: steps.changes.outputs.run == 'true'
+        # En paralelo con pytest-xdist: cada worker tiene su propia SQLite
+        # (conftest.py la crea con tmp_path_factory, que es distinto por
+        # worker). Sin cobertura: no hay umbral que la exija y en CI no la lee
+        # nadie; en local sigue saliendo con `pytest` a secas.
+        run: python -m pytest -q -m "not oracle" -n auto --no-cov
 
   spa:
     name: SPA suites
+    if: github.event_name == 'push' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web/app
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: ¿El cambio afecta al SPA?
+        id: changes
+        working-directory: .
+        run: |
+          # Las suites y el build del SPA solo leen web/app/.
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ] || \
+             git diff --name-only HEAD^1 HEAD | grep -qE '^web/app/|^\.github/workflows/tests\.yml$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::El PR no toca el SPA; se salta."
+          fi
 
       - name: Set up Node
+        if: steps.changes.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -61,6 +135,7 @@ jobs:
           scope: '@projectellysia'
 
       - name: Set up pnpm
+        if: steps.changes.outputs.run == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 11.10.0
@@ -86,12 +161,15 @@ jobs:
       # dependencias nuevas, que es cuando entran. Aqui el lockfile ya esta
       # commiteado y revisado, que es el caso que la propia opcion documenta.
       - name: Install dependencies
+        if: steps.changes.outputs.run == 'true'
         run: pnpm install --frozen-lockfile --trust-lockfile
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run SPA suites
+        if: steps.changes.outputs.run == 'true'
         run: pnpm test
 
       - name: Build the SPA
+        if: steps.changes.outputs.run == 'true'
         run: pnpm build

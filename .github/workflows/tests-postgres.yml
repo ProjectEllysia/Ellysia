@@ -1,24 +1,36 @@
 name: API Tests (PostgreSQL + Redis)
 
 # La suite normal (tests.yml) corre sobre SQLite con Redis y la red cortados:
-# tarda ~2 minutos y su resultado no depende de lo que tenga levantado la
+# tarda unos minutos y su resultado no depende de lo que tenga levantado la
 # máquina. El precio es que hay invariantes de producción que ese entorno no
 # puede comprobar — longitudes de columna, claves foráneas, JSONB y las
 # carreras entre transacciones reales.
 #
 # Este job las cubre con PostgreSQL y Redis efímeros. Va aparte a propósito:
-# la matriz de servicios no debe ralentizar el ciclo rápido, que es el que se
-# ejecuta en cada push.
+# la matriz de servicios no debe ralentizar la suite normal.
+#
+# Solo corre en los PR que tocan API/: es lo único que lee. No corre en los
+# push, porque el PR ya probó el merge con la base, y esta matriz no es la
+# puerta del despliegue (esa es tests.yml).
 
 on:
-  push:
-    branches: [main, 'v[0-9]+.[0-9]+']
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, 'v[0-9]+.[0-9]+']
+    paths:
+      - 'API/**'
+      - '.github/workflows/tests-postgres.yml'
+
+# Un push nuevo a un PR deja obsoleta la pasada anterior, y se cancela.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   integration:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: API
@@ -78,9 +90,7 @@ jobs:
             API/requirements-dev.txt
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Run the real-engine matrix
         # Solo los tests marcados: el resto de la suite ya corrió en tests.yml

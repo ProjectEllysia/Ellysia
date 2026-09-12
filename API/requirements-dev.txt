@@ -5,6 +5,8 @@
 pytest>=7.4.3
 pytest-cov>=4.1.0
 pytest-mock>=3.12.0
+# Suite en paralelo (`pytest -n auto`), como la corre la CI.
+pytest-xdist>=3.5
 
 # Genera imágenes QR en los tests de Iris (D1, quishing) -- no es una
 # dependencia de producción, Iris solo *decodifica* QRs (opencv-python-headless
