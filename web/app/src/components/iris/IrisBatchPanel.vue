@@ -1,4 +1,5 @@
 <template>
+  <Transition name="batch-slide">
   <section v-if="batch" class="batch-panel" aria-live="polite">
     <header class="batch-header">
       <div>
@@ -40,6 +41,7 @@
       </table>
     </div>
   </section>
+  </Transition>
 </template>
 
 <script setup>
@@ -82,4 +84,14 @@ const finishedCount = computed(() => tracked.value.filter(item => TERMINAL.inclu
 .item-error { display: block; margin-top: 0.2rem; color: var(--text-muted); }
 .link-btn { border: none; background: none; padding: 0; color: var(--accent-bright); cursor: pointer; font-size: var(--fs-sm); }
 .muted { color: var(--text-muted); }
+
+/* El panel empuja el informe hacia abajo: entra y sale deslizándose para que
+   ese salto no ocurra de golpe. */
+.batch-slide-enter-active { transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1); }
+.batch-slide-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.batch-slide-enter-from, .batch-slide-leave-to { opacity: 0; transform: translateY(-6px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-slide-enter-active, .batch-slide-leave-active { transition: none; }
+}
 </style>
