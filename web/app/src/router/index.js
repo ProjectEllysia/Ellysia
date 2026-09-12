@@ -51,6 +51,14 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // Resultados de las campañas ya lanzadas, agrupados por píldora. Lanzar
+    // se hace desde el generador; aquí solo se consulta.
+    path: '/aegis/campanas',
+    name: 'AegisCampaigns',
+    component: () => import('@/views/AegisCampaignsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     // Quiz público de una campaña de Aegis: el destino del enlace del correo.
     // PÚBLICA a propósito — el destinatario no tiene cuenta y el token de la
     // query es su única identidad. Cuelga de /quiz y no de /aegis/quiz porque

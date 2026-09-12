@@ -319,11 +319,11 @@ Iris applies rules across authentication (SPF, DKIM, DMARC, ARC), header anomali
 | `GET` | `/aegis/export/md/<id>` | Raw Markdown of a pill |
 | `POST/GET/DELETE` | `/aegis/lists[/<id>]` | Distribution lists (owner) |
 | `POST/GET/DELETE` | `/aegis/lists/<id>/recipients[/<rid>]` | Recipients within a list (owner) |
-| `POST/GET/DELETE` | `/aegis/campaigns[/<id>]` | Create / list / detail / delete a campaign (owner) |
+| `POST/GET/DELETE` | `/aegis/campaigns[/<id>]` | Create / list / detail / delete a campaign (owner). The list carries each campaign's recipient summary (`recipientCount`, `openedCount`, `completedCount`, `averageScore`); the detail adds per-recipient tracking and per-question results against the frozen quiz (`optionCounts`, `answeredCount`, `correctCount`) |
 | `POST` | `/aegis/campaigns/<id>/launch` | Launch: snapshots the quiz, mints one opaque token per recipient, queues sending |
 | `GET/POST` | `/aegis/quiz?t=<token>` | **Public, no auth** — serve/grade the quiz for one recipient. One-shot: a completed token always 409s on resubmission |
 
-Aegis combines AI-generated awareness content with current alerts from the **INCIBE-CERT RSS feed** and the **local Lybra knowledge base** (NVD/KEV/EPSS), scoped to the products the organization tracks. Each generated pill also gets a multiple-choice quiz; a **campaign** sends the pill + quiz to a distribution list, tracking `sent → opened → completed` per recipient via `herald`.
+Aegis combines AI-generated awareness content with current alerts from the **INCIBE-CERT RSS feed** and the **local Lybra knowledge base** (NVD/KEV/EPSS), scoped to the products the organization tracks. Each generated pill also gets a multiple-choice quiz; a **campaign** sends the pill + quiz to a distribution list, tracking `sent → opened → completed` per recipient via `herald`. The SPA keeps launching and reviewing apart: a campaign is launched from the pill viewer, and `/aegis/campanas` groups the launched ones by pill, with their aggregate open and completion rates, average score and per-question results.
 
 ### Acheron — credential vault
 
@@ -489,9 +489,9 @@ POSTGRES_TEST_URL=postgresql+psycopg2://ellysia:ellysia@localhost:55432/ellysia_
 
 Run it in its **own** pytest invocation. The fast suite's SQLite shim rewrites `JSONB` to generic `JSON` in the shared model metadata, so a mixed run would build the wrong schema; the fixtures detect that and skip with an explanatory message rather than assert against an imitation.
 
-CI runs two workflows on push/PR to `main`, the `vX.Y` release branches and the `proyecto/**` integration branches: `.github/workflows/tests.yml` (two jobs — `tests`, running `python -m pytest -q -m "not oracle"` on SQLite, and `SPA suites`, running the SPA's node suites) and `.github/workflows/tests-postgres.yml` (`python -m pytest -q -m postgres`, with ephemeral PostgreSQL and Redis services). They are separate jobs on purpose — the service matrix must not slow down the cycle that runs on every push. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
+CI runs on pull requests to `main`, the `vX.Y` release branches and the `proyecto/**` integration branches, and on pushes to `main` (the deploy gate). A push to a release branch does not trigger it: the pull request already tested the merge with its base. Draft pull requests are skipped, a new push to a pull request cancels the superseded run, and every job has a timeout. `.github/workflows/tests.yml` has two jobs — `tests`, running `python -m pytest -q -m "not oracle" -n auto --no-cov` on SQLite (in parallel with `pytest-xdist`; the coverage report stays a local one), and `SPA suites`, running the SPA's node suites and build. On a pull request each job skips its work when nothing it reads has changed: the API suite ignores Markdown, `landing/` and `web/app/` — except the router, `ConfigView.vue` and the Themis components, which its contract tests read — and the SPA job only runs when `web/app/` changes. `.github/workflows/tests-postgres.yml` (`python -m pytest -q -m postgres`, with ephemeral PostgreSQL and Redis services) runs only on pull requests that touch `API/`. They are separate jobs on purpose — the service matrix must not slow down the regular suite. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
 
-A third workflow, `.github/workflows/lybra-bench.yml`, runs the `oracle` bench on a schedule (03:15 UTC) and on demand. It is separate because it brings up around twenty Docker containers and takes tens of minutes, which no per-push job can afford. Its deliverable is the numbers, not the green tick: it publishes the Lybra engine's Phase R precision, its agreement with Nmap and its false-positive rate to the run summary, and uploads the full log as an artifact.
+A third workflow, `.github/workflows/lybra-bench.yml`, runs the `oracle` bench on a schedule (03:15 UTC) — only when the engine, its benches or the dependencies changed on `main` in the last 25 hours, since re-measuring unchanged code gives the same numbers — and on demand. It is separate because it brings up around twenty Docker containers and takes tens of minutes, which no per-push job can afford. Its deliverable is the numbers, not the green tick: it publishes the Lybra engine's Phase R precision, its agreement with Nmap and its false-positive rate to the run summary, and uploads the full log as an artifact.
 
 ### Web SPA (node, no framework)
 
@@ -500,8 +500,8 @@ cd web/app
 npm test                  # all nine suites — this is what CI runs
 
 npm run test:acheron      # schema/label correspondence + crypto interop + CRUD + sync for the Acheron vault client
-npm run test:iris         # file intake (size limit from GET /iris/capabilities, explicit mode, batch drops) and report comparison
-npm run test:hygeia       # metric-formatting tests for the Hygeia dashboard
+npm run test:iris         # file intake (size limit from GET /iris/capabilities, explicit mode, batch drops), report comparison, and the Spanish labels for verdicts, statuses and rule results
+npm run test:hygeia       # metric formatting, chart math, and asset-status/anomaly labels for the Hygeia dashboard
 npm run test:polling      # usePolling composable tests
 npm run test:element-width # useElementWidth composable tests
 npm run test:toast        # toast-store tests
@@ -857,4 +857,4 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 - `API/src/data/` and `docs/` are gitignored (scan outputs, generated PDFs).
 - PostgreSQL uses port **15432** locally (not standard 5432).
 - There is a single `TaskStatus` enum, in `system/taskqueue/task.py`; `themis/services/tasks.py` imports it rather than defining its own.
-- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.15`, read by `CR.get_app_version()`).
+- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.17`, read by `CR.get_app_version()`).

@@ -35,6 +35,7 @@ python run.py --with-worker                      # + worker RQ como subproceso
 python -m src.modules.system.taskqueue.worker    # worker RQ suelto — OBLIGATORIO para tareas async
 
 pytest                                           # suite completa + cobertura (SQLite, servicios externos mockeados)
+pytest -n auto --no-cov                          # en paralelo (pytest-xdist) y sin cobertura, como la CI
 pytest -m unit                                   # solo unitarios (sin app, sin BD)
 pytest -m integration                            # integración (arranca create_app + cliente HTTP de test)
 pytest tests/integration/test_oauth.py -q
@@ -42,8 +43,11 @@ pytest tests/integration/test_oauth.py::TestX::test_y
 
 pylint src                                        # config en API/.pylintrc
 ```
-CI: `.github/workflows/tests.yml` ejecuta `python -m pytest -q` en push/PR a `main`.
-También hay `deploy.yml` y `landing.yml`.
+CI: `.github/workflows/tests.yml` ejecuta `python -m pytest -q -m "not oracle" -n auto --no-cov`
+y las suites del SPA en los PR hacia `main`, las `vX.Y` y `proyecto/**`, y en el push a `main`
+(la puerta del despliegue). En un PR, cada job se salta si no cambia nada de lo que lee.
+También hay `tests-postgres.yml` (solo en PR que tocan `API/`), `lybra-bench.yml` (de noche, solo
+si el motor cambió), `deploy.yml` y `landing.yml`.
 
 Algunos tests usan `xfail(strict=True)` para documentar bugs reales: cuando el bug se arregla el
 test pasa a XPASS y **hay que quitar el marcador**. La adaptación a SQLite y los mocks viven
@@ -523,9 +527,10 @@ nada lo obliga a estar fresco. Dos reglas:
 (estaba contenida entera en la rama de versión), se rodeaba en 9 de cada 12 merges, y duplicaba
 el papel que la `vX.Y` ya cumple. Si ves una referencia a ella en algún sitio, está caducada.
 
-El CI (`tests.yml`) corre en `main` **y** en las `vX.Y` (`branches: [main, 'v[0-9]+.[0-9]+']`).
-`deploy.yml` sigue filtrando por `main`, así que una rama de versión ejecuta tests pero nunca
-despliega.
+El CI (`tests.yml`) corre en los PR hacia `main` y hacia las `vX.Y`, y en el push a `main`. Un
+push a una rama de versión no lo dispara: el PR ya probó el merge de su rama con la base, y
+repetirlo al mergear solo gastaba minutos de Actions. `deploy.yml` solo despliega tras el push
+a `main`.
 
 > Ojo al desfase: la `vX.Y` puede ir por delante de `main` con cosas sin publicar, y el
 > `appVersion` de `SecOpsConfig.json` puede ir por detrás del nombre de la rama. Ninguna de las

@@ -163,10 +163,10 @@
                     </td>
                     <td class="mono col-date">{{ formatDate(item.startedAt) }}</td>
                     <td>
-                      <span class="status-chip" :class="`status--${item.status}`">{{ statusLabel(item.status) }}</span>
+                      <span class="status-chip" :class="`status--${item.status}`">{{ analysisStatusLabel(item.status) }}</span>
                     </td>
                     <td class="col-score">
-                      <div v-if="item.totalScore != null" class="score-rail" :title="`${item.totalScore} · ${item.verdict}`">
+                      <div v-if="item.totalScore != null" class="score-rail" :title="`${item.totalScore} · ${verdictLabel(item.verdict)}`">
                         <span class="rail-track"></span>
                         <span class="rail-tick" :style="{ left: store.thresholds.suspicious + '%' }"></span>
                         <span class="rail-tick" :style="{ left: store.thresholds.legitimate + '%' }"></span>
@@ -216,6 +216,7 @@ import AppPagination from '@/components/shared/AppPagination.vue'
 import IrisCompareModal from '@/components/iris/IrisCompareModal.vue'
 import { useIrisStore } from '@/stores/irisStore'
 import { useModalA11y } from '@/composables/useModalA11y'
+import { analysisStatusLabel, verdictClass, verdictLabel } from '@/components/iris/verdict'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -342,24 +343,6 @@ function sortIndicator(field) {
 function clampScore(score) {
   if (score == null) return 0
   return Math.min(100, Math.max(0, score))
-}
-
-function verdictClass(v) {
-  if (!v) return 'unknown'
-  const l = v.toLowerCase()
-  if (l === 'legitimate') return 'legit'
-  if (l === 'suspicious') return 'susp'
-  if (l === 'phishing') return 'phish'
-  return 'unknown'
-}
-
-function statusLabel(s) {
-  if (s === 'running') return 'En análisis'
-  if (s === 'pending') return 'Pendiente'
-  if (s === 'failed') return 'Fallido'
-  if (s === 'cancelled') return 'Cancelado'
-  if (s === 'finished') return 'Finalizado'
-  return s || ''
 }
 
 function formatDate(iso) {

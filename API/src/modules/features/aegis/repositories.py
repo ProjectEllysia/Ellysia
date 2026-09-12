@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from sqlalchemy import case, func
+
 from src.modules.shared import utcnow_naive
 from src.modules.features.aegis.model import (
     AegisDocument,
@@ -435,6 +437,53 @@ class CampaignRepository(BaseRepository[Campaign]):
             .all()
         )
 
+    def get_recipient_summaries(self, campaign_ids: list[int]) -> dict[int, dict]:
+        """Resume en una sola consulta hasta dónde llegaron los destinatarios de cada campaña.
+
+        Sirve al listado de campañas, que necesita las cifras de todas a la
+        vez: agregar en la base de datos evita traer cada fila de seguimiento
+        solo para contarla. Los estados son acumulativos —cada destinatario
+        guarda el punto más avanzado al que llegó—, así que quien completó el
+        test cuenta también como abierto.
+
+        Args:
+            campaign_ids: Ids de las campañas que se quieren resumir. Una lista
+                vacía devuelve ``{}`` sin consultar.
+
+        Returns:
+            dict[int, dict]: ``{campaign_id: resumen}``, donde cada resumen trae
+                ``recipientCount``, ``openedCount``, ``completedCount`` y
+                ``averageScore`` (aciertos medios de quienes completaron, o
+                ``None`` si nadie ha completado). Una campaña sin destinatarios
+                —un borrador— no aparece en el dict.
+        """
+        if not campaign_ids:
+            return {}
+        opened = case((CampaignRecipient.status.in_(("opened", "completed")), 1), else_=0)
+        completed = case((CampaignRecipient.status == "completed", 1), else_=0)
+        rows = (
+            self._session.query(
+                CampaignRecipient.campaign_id,
+                func.count(CampaignRecipient.id),
+                func.sum(opened),
+                func.sum(completed),
+                # AVG ignora los NULL: la nota solo existe en quien completó.
+                func.avg(CampaignRecipient.score),
+            )
+            .filter(CampaignRecipient.campaign_id.in_(campaign_ids))
+            .group_by(CampaignRecipient.campaign_id)
+            .all()
+        )
+        return {
+            campaign_id: {
+                "recipientCount": recipient_count,
+                "openedCount": int(opened_count or 0),
+                "completedCount": int(completed_count or 0),
+                "averageScore": float(average_score) if average_score is not None else None,
+            }
+            for campaign_id, recipient_count, opened_count, completed_count, average_score in rows
+        }
+
     def create_campaign(
         self, user_id: int, document_id: int, list_id: int, name: str,
     ) -> Campaign:
@@ -495,6 +544,33 @@ class CampaignRepository(BaseRepository[Campaign]):
             .order_by(CampaignRecipient.id)
             .all()
         )
+
+    def get_answer_counts(self, campaign_id: int) -> dict[tuple[int, int], int]:
+        """Cuenta cuántos destinatarios de una campaña eligieron cada opción de cada pregunta.
+
+        Es la materia prima de los resultados por pregunta del detalle de la
+        campaña: de aquí sale cuánta gente respondió cada pregunta, cuánta
+        acertó y qué opción equivocada atrajo más.
+
+        Args:
+            campaign_id: Id de la campaña cuyas respuestas se cuentan.
+
+        Returns:
+            dict[tuple[int, int], int]: ``{(question_position, selected_index): count}``.
+                Una combinación que nadie eligió no aparece, que equivale a un cero.
+        """
+        rows = (
+            self._session.query(
+                CampaignAnswer.question_position,
+                CampaignAnswer.selected_index,
+                func.count(CampaignAnswer.id),
+            )
+            .join(CampaignRecipient, CampaignAnswer.campaign_recipient_id == CampaignRecipient.id)
+            .filter(CampaignRecipient.campaign_id == campaign_id)
+            .group_by(CampaignAnswer.question_position, CampaignAnswer.selected_index)
+            .all()
+        )
+        return {(position, selected_index): count for position, selected_index, count in rows}
 
     def get_recipient_by_token(self, token: str) -> Optional[CampaignRecipient]:
         """

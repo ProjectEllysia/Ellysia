@@ -12,6 +12,11 @@ name: Lybra Bench (nocturno)
 # faltaba. Va **aparte** del de tests a propósito: levanta una veintena de
 # contenedores y tarda del orden de veinte minutos, así que no puede colgarse de
 # cada push. Corre de noche y a mano.
+#
+# De noche solo mide si el motor cambió en el último día. Una ejecución
+# programada corre sobre main, que solo cambia en cada release: repetir la
+# medición sobre el mismo código daba las mismas cifras y gastaba unos veinte
+# minutos de Actions cada noche. A mano (workflow_dispatch) mide siempre.
 
 on:
   schedule:
@@ -46,8 +51,34 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Historia suficiente para ver los commits del último día en main.
+          fetch-depth: 50
+
+      - name: ¿Ha cambiado el motor?
+        id: gate
+        working-directory: .
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Lo que puede mover las cifras: el motor y sus feeds (todo cuelga de
+          # themis/), los propios bancos, las dependencias y este workflow.
+          changed=$(git log --since="25 hours ago" --format=%h -- \
+            API/src/modules/features/themis \
+            API/tests/oracle \
+            API/requirements.txt API/requirements-dev.txt \
+            .github/workflows/lybra-bench.yml)
+          if [ -n "$changed" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::El motor no ha cambiado en main en las últimas 25 h; no se repite la medición."
+          fi
 
       - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -57,17 +88,18 @@ jobs:
             API/requirements-dev.txt
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -r requirements-dev.txt
+        if: steps.gate.outputs.run == 'true'
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Comprobar que hay Docker
+        if: steps.gate.outputs.run == 'true'
         # Si el runner se quedara sin Docker, todos los bancos se saltarían y el
         # job saldría verde sin haber medido nada — que es exactamente el
         # resultado engañoso que este workflow existe para evitar.
         run: docker version --format '{{.Server.Version}}'
 
       - name: Precargar las imágenes del catálogo
+        if: steps.gate.outputs.run == 'true'
         # Descargarlas dentro del test cuenta contra su propio timeout de
         # arranque y hace que un fallo de red se lea como "el objetivo no
         # respondió". Aquí se ve por lo que es.
@@ -81,6 +113,7 @@ jobs:
 
       - name: Correr los bancos
         id: bench
+        if: steps.gate.outputs.run == 'true'
         # ``-s`` para que los informes lleguen a la salida: el entregable de
         # estos bancos es el número, no el verde. ``--no-cov`` porque la
         # cobertura aquí no dice nada y cuesta.
@@ -91,7 +124,7 @@ jobs:
       - name: Publicar las cifras en el resumen
         # Se ejecuta también cuando los bancos fallan: si la precisión se cae,
         # el número es justo lo que hay que poder mirar sin abrir el log.
-        if: always()
+        if: always() && steps.gate.outputs.run == 'true'
         run: |
           {
             echo "## Cifras del motor Lybra"
@@ -105,7 +138,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Guardar el log completo
-        if: always()
+        if: always() && steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: lybra-bench-log

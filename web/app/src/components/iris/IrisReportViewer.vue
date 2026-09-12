@@ -1,6 +1,9 @@
 <template>
   <div class="report-viewer">
 
+    <!-- Un fundido entre estados: sin él, Vue cambia formulario, carga e
+         informe en el mismo fotograma y todo aparece de golpe. -->
+    <Transition name="rv-swap" mode="out-in">
     <!-- EMPTY -- no selection, show form -->
     <div v-if="!reportId && !reportData && !reportLoading" class="rv-empty">
       <slot name="form" />
@@ -46,7 +49,8 @@
     </div>
 
     <!-- FINISHED REPORT -->
-    <div v-else-if="reportData && reportData.status === 'finished'" class="rv-report">
+    <!-- La key hace que pasar de un informe terminado a otro también se anime. -->
+    <div v-else-if="reportData && reportData.status === 'finished'" :key="reportData.analysisId" class="rv-report">
       <div class="rv-report-header">
         <div class="rv-report-id">
           <span v-if="reportData.title" class="report-title">{{ reportData.title }}</span>
@@ -99,7 +103,7 @@
           <span v-if="reportData.winningReason" class="unwrap-wrapper-info">{{ reportData.winningReason }}</span>
           <span v-if="reportData.secondaryContext" class="unwrap-wrapper-info">
             {{ reportData.secondaryContext.contextType === 'wrapper' ? 'Envoltorio' : 'Original' }}:
-            {{ reportData.secondaryContext.verdict }} ({{ reportData.secondaryContext.totalScore }} puntos)
+            {{ verdictLabel(reportData.secondaryContext.verdict) }} ({{ reportData.secondaryContext.totalScore }} puntos)
           </span>
           <span v-if="reportData.wrapperFrom || reportData.wrapperSubject" class="unwrap-wrapper-info">
             Envoltorio: <template v-if="reportData.wrapperFrom">de {{ reportData.wrapperFrom }}</template>
@@ -380,6 +384,7 @@
       </div>
 
     </div>
+    </Transition>
 
     <!-- Informes PDF (modal, fuera del flujo de scroll del informe) -->
     <IrisDocumentsModal
@@ -400,6 +405,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { useUtils } from '@/composables/useUtils'
+import { verdictLabel } from '@/components/iris/verdict'
 import { useIrisStore } from '@/stores/irisStore'
 import IrisEmailPath from '@/components/iris/IrisEmailPath.vue'
 import IrisDocumentsModal from '@/components/iris/IrisDocumentsModal.vue'
@@ -1411,5 +1417,41 @@ watch(
 .btn-export-csv svg {
   width: 16px;
   height: 16px;
+}
+
+/* Fundido entre estados del visor (formulario, carga, en curso, informe). */
+.rv-swap-enter-active {
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.rv-swap-leave-active {
+  transition: opacity 0.15s ease;
+}
+.rv-swap-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.rv-swap-leave-to {
+  opacity: 0;
+}
+
+/* Entrada escalonada de las secciones del informe, con la misma animación
+   que la tira de historial. De la novena en adelante comparten retraso: al
+   abrir quedan por debajo del pliegue y hacerlas esperar más no aporta. */
+.rv-report > * {
+  animation: seq-fade-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.rv-report > :nth-child(2) { animation-delay: 0.04s; }
+.rv-report > :nth-child(3) { animation-delay: 0.08s; }
+.rv-report > :nth-child(4) { animation-delay: 0.12s; }
+.rv-report > :nth-child(5) { animation-delay: 0.16s; }
+.rv-report > :nth-child(6) { animation-delay: 0.2s; }
+.rv-report > :nth-child(7) { animation-delay: 0.24s; }
+.rv-report > :nth-child(8) { animation-delay: 0.28s; }
+.rv-report > :nth-child(n+9) { animation-delay: 0.32s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rv-swap-enter-active, .rv-swap-leave-active { transition: none; }
+  .rv-swap-enter-from { transform: none; }
+  .rv-report > * { animation: none; }
 }
 </style>
